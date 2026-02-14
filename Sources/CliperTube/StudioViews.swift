@@ -1774,7 +1774,6 @@ struct YouTubeEmbedPlayerView: NSViewRepresentable {
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
-        configuration.allowsInlineMediaPlayback = true
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.setValue(false, forKey: "drawsBackground")
         webView.load(URLRequest(url: url))

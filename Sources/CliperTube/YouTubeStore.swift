@@ -48,6 +48,9 @@ final class YouTubeStore: ObservableObject {
     @Published var channels: [YouTubeChannelInfo] = []
     @Published var selectedChannelID: String?
     @Published var recentVideos: [YouTubeVideoInfo] = []
+    @Published var browserQuery: String = ""
+    @Published var browserVideos: [YouTubeVideoInfo] = []
+    @Published var selectedPreviewVideoID: String?
     @Published var lastUploadedVideoID: String?
 
     private let fileManager = FileManager.default
@@ -163,6 +166,36 @@ final class YouTubeStore: ObservableObject {
 
     func openVideo(_ video: YouTubeVideoInfo) {
         NSWorkspace.shared.open(video.watchURL)
+    }
+
+    func searchBrowserVideos() {
+        guard isBusy == false else { return }
+        Task {
+            await runBrowserSearch()
+        }
+    }
+
+    func selectPreviewVideo(_ videoID: String) {
+        selectedPreviewVideoID = videoID
+    }
+
+    var selectedPreviewVideo: YouTubeVideoInfo? {
+        if let selectedPreviewVideoID {
+            return browserVideos.first(where: { $0.id == selectedPreviewVideoID })
+                ?? recentVideos.first(where: { $0.id == selectedPreviewVideoID })
+        }
+        return browserVideos.first ?? recentVideos.first
+    }
+
+    func embedURL(for videoID: String) -> URL? {
+        var components = URLComponents(string: "https://www.youtube.com/embed/\(videoID)")
+        components?.queryItems = [
+            .init(name: "playsinline", value: "1"),
+            .init(name: "autoplay", value: "0"),
+            .init(name: "rel", value: "0"),
+            .init(name: "modestbranding", value: "1")
+        ]
+        return components?.url
     }
 
     func openUploadedVideo(videoID: String) {
@@ -299,20 +332,71 @@ final class YouTubeStore: ObservableObject {
             return
         }
 
-        var components = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
-        components.queryItems = [
+        recentVideos = try await fetchVideos(channelID: channelID, query: nil, maxResults: 20, order: "date")
+
+        if selectedPreviewVideoID == nil,
+           let firstID = recentVideos.first?.id {
+            selectedPreviewVideoID = firstID
+        }
+    }
+
+    private func runBrowserSearch() async {
+        guard token != nil else {
+            lastError = "Connect YouTube before searching videos."
+            return
+        }
+
+        let query = browserQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard query.isEmpty == false else {
+            lastError = "Enter a search query to find videos."
+            return
+        }
+
+        isBusy = true
+        defer { isBusy = false }
+
+        do {
+            browserVideos = try await fetchVideos(channelID: nil, query: query, maxResults: 24, order: "relevance")
+            if let firstID = browserVideos.first?.id {
+                selectedPreviewVideoID = firstID
+            }
+            statusMessage = "Search returned \(browserVideos.count) video(s)."
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
+            statusMessage = "YouTube search failed."
+        }
+    }
+
+    private func fetchVideos(
+        channelID: String?,
+        query: String?,
+        maxResults: Int,
+        order: String
+    ) async throws -> [YouTubeVideoInfo] {
+        var queryItems: [URLQueryItem] = [
             .init(name: "part", value: "snippet"),
-            .init(name: "channelId", value: channelID),
-            .init(name: "maxResults", value: "20"),
-            .init(name: "order", value: "date"),
+            .init(name: "maxResults", value: String(max(1, min(maxResults, 50)))),
+            .init(name: "order", value: order),
             .init(name: "type", value: "video")
         ]
+
+        if let channelID, channelID.isEmpty == false {
+            queryItems.append(.init(name: "channelId", value: channelID))
+        }
+
+        if let query, query.isEmpty == false {
+            queryItems.append(.init(name: "q", value: query))
+        }
+
+        var components = URLComponents(string: "https://www.googleapis.com/youtube/v3/search")!
+        components.queryItems = queryItems
 
         let (data, _) = try await authorizedRequest(url: components.url!)
         let response = try JSONDecoder().decode(VideoSearchResponse.self, from: data)
 
         let formatter = ISO8601DateFormatter()
-        recentVideos = response.items.compactMap { item in
+        return response.items.compactMap { item in
             guard let videoID = item.id.videoID else { return nil }
             return YouTubeVideoInfo(
                 id: videoID,

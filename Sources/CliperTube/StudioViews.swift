@@ -2,6 +2,7 @@ import AppKit
 import AVKit
 import SwiftUI
 import UniformTypeIdentifiers
+import WebKit
 
 struct StudioRootView: View {
     @EnvironmentObject private var store: StudioStore
@@ -598,6 +599,118 @@ struct YouTubeHubView: View {
                             }
                         }
                         .padding(.vertical, 4)
+                    }
+                }
+
+                GroupBox("YouTube Browser + Live Preview") {
+                    VStack(alignment: .leading, spacing: 10) {
+                        HStack(spacing: 8) {
+                            TextField("Search YouTube videos", text: $youtube.browserQuery)
+                                .textFieldStyle(.roundedBorder)
+
+                            Button("Search") {
+                                youtube.searchBrowserVideos()
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(youtube.isAuthenticated == false || youtube.isBusy)
+
+                            if youtube.browserVideos.isEmpty == false {
+                                Button("Clear") {
+                                    youtube.browserVideos = []
+                                    youtube.selectedPreviewVideoID = nil
+                                }
+                                .buttonStyle(.bordered)
+                            }
+                        }
+
+                        HStack(alignment: .top, spacing: 12) {
+                            VStack(alignment: .leading, spacing: 6) {
+                                Text("Results")
+                                    .font(.headline)
+
+                                let videos = youtube.browserVideos.isEmpty ? youtube.recentVideos : youtube.browserVideos
+
+                                if videos.isEmpty {
+                                    Text("Search videos or load recent channel videos to preview in-app.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                } else {
+                                    ScrollView {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            ForEach(videos) { video in
+                                                Button {
+                                                    youtube.selectPreviewVideo(video.id)
+                                                } label: {
+                                                    HStack(alignment: .top) {
+                                                        VStack(alignment: .leading, spacing: 2) {
+                                                            Text(video.title)
+                                                                .font(.subheadline.weight(.semibold))
+                                                                .foregroundStyle(.primary)
+                                                                .multilineTextAlignment(.leading)
+                                                            Text(video.id)
+                                                                .font(.caption.monospaced())
+                                                                .foregroundStyle(.secondary)
+                                                        }
+                                                        Spacer(minLength: 0)
+                                                        if video.id == youtube.selectedPreviewVideo?.id {
+                                                            Text("Preview")
+                                                                .font(.caption.weight(.semibold))
+                                                                .padding(.horizontal, 6)
+                                                                .padding(.vertical, 3)
+                                                                .background(Color.blue.opacity(0.16))
+                                                                .clipShape(Capsule())
+                                                        }
+                                                    }
+                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                    .padding(8)
+                                                    .background(Color.secondary.opacity(0.08))
+                                                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                                                }
+                                                .buttonStyle(.plain)
+                                            }
+                                        }
+                                    }
+                                    .frame(maxHeight: 220)
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+
+                            VStack(alignment: .leading, spacing: 8) {
+                                Text("Player")
+                                    .font(.headline)
+
+                                if let selected = youtube.selectedPreviewVideo,
+                                   let embedURL = youtube.embedURL(for: selected.id) {
+                                    YouTubeEmbedPlayerView(url: embedURL)
+                                        .frame(minHeight: 220)
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+
+                                    HStack(spacing: 8) {
+                                        Button("Use in Project") {
+                                            store.youtubeInput = selected.watchURL.absoluteString
+                                            store.createProjectFromYouTubeLink()
+                                            store.selectedSection = .projects
+                                        }
+                                        .buttonStyle(.borderedProminent)
+
+                                        Button("Open on YouTube") {
+                                            youtube.openVideo(selected)
+                                        }
+                                        .buttonStyle(.bordered)
+                                    }
+                                } else {
+                                    Text("Select a video from the results to preview it here.")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                                        .padding(.vertical, 28)
+                                        .background(Color.secondary.opacity(0.08))
+                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                }
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                        }
                     }
                 }
             }
@@ -1653,5 +1766,24 @@ struct MetricCard: View {
         .padding(12)
         .background(Color.secondary.opacity(0.08))
         .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+}
+
+struct YouTubeEmbedPlayerView: NSViewRepresentable {
+    var url: URL
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.allowsInlineMediaPlayback = true
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.setValue(false, forKey: "drawsBackground")
+        webView.load(URLRequest(url: url))
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {
+        if nsView.url != url {
+            nsView.load(URLRequest(url: url))
+        }
     }
 }

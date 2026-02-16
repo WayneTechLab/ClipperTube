@@ -40,7 +40,7 @@ struct StudioRootView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Text("v1.1.0")
+            Text("v1.2.0")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 12)

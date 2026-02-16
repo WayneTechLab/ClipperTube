@@ -1542,9 +1542,12 @@ struct TimelineView: View {
             .padding(22)
         }
         .onAppear {
-            reloadPreview()
+            reloadPreview(autoPlay: true)
         }
-        .onChange(of: store.activeProject?.updatedAt) { _ in
+        .onChange(of: store.activeProjectID) { _ in
+            reloadPreview(autoPlay: true)
+        }
+        .onChange(of: store.activeProject?.timelineVideoClips.count) { _ in
             reloadPreview()
         }
         .onReceive(playbackTimer) { _ in

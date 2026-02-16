@@ -15,6 +15,14 @@ final class StudioStore: ObservableObject {
     @Published var statusMessage: String = "Paste a YouTube link to start a Cliper Tube project."
     @Published var lastError: String?
 
+    // Download automation state
+    @Published var isDownloading: Bool = false
+    @Published var downloadProgress: Double = 0
+    @Published var downloadSpeed: String = ""
+    @Published var downloadETA: String = ""
+    @Published var ytdlpAvailable: Bool = VideoDownloader.isYtdlpInstalled()
+    @Published var selectedDownloadQuality: VideoQuality = .best
+
     private let persistence = ProjectPersistence()
     private let fileManager = FileManager.default
 
@@ -106,12 +114,20 @@ final class StudioStore: ObservableObject {
             return
         }
 
+        // Auto-download flow for YouTube URLs
         if let videoID = YouTubeParser.extractID(from: trimmed) {
+            // Check if yt-dlp is available for automatic download
+            if ytdlpAvailable {
+                startAutomatedDownload(url: trimmed, videoID: videoID)
+                return
+            }
+            
+            // Fallback: create project without download
             let project = makeProject(videoID: videoID, sourceInput: trimmed, titlePrefix: "Cliper Project \(videoID)")
             demoteCurrentProjects(excluding: project.id)
             projects.insert(project, at: 0)
             activeProjectID = project.id
-            statusMessage = "Project created for video ID: \(videoID). Import a local/remote source video in Timeline to play and edit."
+            statusMessage = "Project created for video ID: \(videoID). Install yt-dlp for auto-download, or import a local video."
             persistWorkspace()
             return
         }
@@ -143,6 +159,100 @@ final class StudioStore: ObservableObject {
                activeProject?.timelineVideoClips.isEmpty == false {
                 statusMessage = "Project ready. Timeline playback is loaded."
             }
+        }
+    }
+
+    /// Automated download + project creation + import pipeline
+    func startAutomatedDownload(url: String, videoID: String) {
+        guard !isDownloading else {
+            lastError = "A download is already in progress."
+            return
+        }
+        
+        isDownloading = true
+        downloadProgress = 0
+        downloadSpeed = ""
+        downloadETA = ""
+        statusMessage = "Connecting to YouTube..."
+        
+        Task { @MainActor in
+            do {
+                // Fetch metadata first for better UX
+                statusMessage = "Fetching video info..."
+                let metadata = try await VideoDownloader.fetchMetadata(url: url)
+                
+                // Create project immediately so user sees it
+                let project = makeProject(
+                    videoID: metadata.videoID,
+                    sourceInput: url,
+                    titlePrefix: metadata.title
+                )
+                demoteCurrentProjects(excluding: project.id)
+                projects.insert(project, at: 0)
+                activeProjectID = project.id
+                persistWorkspace()
+                
+                statusMessage = "Downloading: \(metadata.title)..."
+                
+                // Download with progress tracking
+                let result = try await VideoDownloader.download(
+                    url: url,
+                    quality: selectedDownloadQuality
+                ) { [weak self] progress in
+                    Task { @MainActor in
+                        self?.downloadProgress = progress.percent / 100.0
+                        self?.downloadSpeed = progress.speed
+                        self?.downloadETA = progress.eta
+                        self?.statusMessage = String(format: "Downloading %.0f%% - %@ - ETA %@", progress.percent, progress.speed, progress.eta)
+                    }
+                }
+                
+                // Import the downloaded video into the project
+                statusMessage = "Importing video into timeline..."
+                await importPrimaryVideo(into: project.id, filePath: result.videoPath)
+                
+                // Navigate to timeline and mark ready
+                selectedSection = .timeline
+                isDownloading = false
+                downloadProgress = 0
+                statusMessage = "Ready to edit: \(result.title)"
+                persistWorkspace()
+                
+            } catch {
+                isDownloading = false
+                downloadProgress = 0
+                lastError = error.localizedDescription
+                
+                // Still create a project even if download failed
+                if YouTubeParser.extractID(from: url) != nil {
+                    let project = makeProject(videoID: videoID, sourceInput: url, titlePrefix: "Cliper Project \(videoID)")
+                    demoteCurrentProjects(excluding: project.id)
+                    projects.insert(project, at: 0)
+                    activeProjectID = project.id
+                    statusMessage = "Download failed. Project created - import video manually."
+                    persistWorkspace()
+                }
+            }
+        }
+    }
+    
+    /// Cancel an ongoing download
+    func cancelDownload() {
+        // Note: Process cancellation would need task tracking - for now just reset state
+        isDownloading = false
+        downloadProgress = 0
+        downloadSpeed = ""
+        downloadETA = ""
+        statusMessage = "Download cancelled."
+    }
+    
+    /// Re-check yt-dlp availability
+    func refreshYtdlpStatus() {
+        ytdlpAvailable = VideoDownloader.isYtdlpInstalled()
+        if ytdlpAvailable {
+            statusMessage = "yt-dlp detected. Automatic YouTube downloads enabled."
+        } else {
+            statusMessage = "yt-dlp not found. Install via: brew install yt-dlp"
         }
     }
 

@@ -152,19 +152,91 @@ struct DashboardView: View {
                 Text("Creator Command Center")
                     .font(.title.weight(.bold))
 
-                HStack(alignment: .center, spacing: 12) {
-                    TextField("Paste YouTube URL/video ID or direct video URL", text: $store.youtubeInput)
-                        .textFieldStyle(.roundedBorder)
+                // URL Input + Actions
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(alignment: .center, spacing: 12) {
+                        TextField("Paste YouTube URL to auto-download and start editing", text: $store.youtubeInput)
+                            .textFieldStyle(.roundedBorder)
+                            .disabled(store.isDownloading)
 
-                    Button("Create Project") {
-                        store.createProjectFromYouTubeLink()
-                    }
-                    .buttonStyle(.borderedProminent)
+                        if store.ytdlpAvailable {
+                            Picker("Quality", selection: $store.selectedDownloadQuality) {
+                                ForEach(VideoQuality.allCases) { quality in
+                                    Text(quality.rawValue).tag(quality)
+                                }
+                            }
+                            .frame(width: 120)
+                            .disabled(store.isDownloading)
+                        }
 
-                    Button("Auto Clip + Stitch") {
-                        store.runAutoClipAndStitch()
+                        if store.isDownloading {
+                            Button("Cancel") {
+                                store.cancelDownload()
+                            }
+                            .buttonStyle(.bordered)
+                        } else {
+                            Button("Create Project") {
+                                store.createProjectFromYouTubeLink()
+                            }
+                            .buttonStyle(.borderedProminent)
+                        }
+
+                        Button("Auto Clip + Stitch") {
+                            store.runAutoClipAndStitch()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(store.isDownloading || store.activeProject == nil)
                     }
-                    .buttonStyle(.bordered)
+
+                    // Download Progress Bar
+                    if store.isDownloading {
+                        VStack(alignment: .leading, spacing: 4) {
+                            ProgressView(value: store.downloadProgress)
+                                .progressViewStyle(.linear)
+                            HStack {
+                                Text(String(format: "%.0f%%", store.downloadProgress * 100))
+                                    .font(.caption.monospacedDigit())
+                                if !store.downloadSpeed.isEmpty {
+                                    Text("•")
+                                        .foregroundStyle(.secondary)
+                                    Text(store.downloadSpeed)
+                                        .font(.caption)
+                                }
+                                if !store.downloadETA.isEmpty {
+                                    Text("•")
+                                        .foregroundStyle(.secondary)
+                                    Text("ETA \(store.downloadETA)")
+                                        .font(.caption)
+                                }
+                                Spacer()
+                            }
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(.top, 4)
+                    }
+
+                    // yt-dlp status indicator
+                    if !store.ytdlpAvailable {
+                        HStack(spacing: 6) {
+                            Image(systemName: "exclamationmark.triangle.fill")
+                                .foregroundStyle(.orange)
+                            Text("yt-dlp not found. Install for auto-download:")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text("brew install yt-dlp")
+                                .font(.caption.monospaced())
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 2)
+                                .background(Color.secondary.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                            Button("Refresh") {
+                                store.refreshYtdlpStatus()
+                            }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                        }
+                        .padding(.top, 4)
+                    }
                 }
 
                 HStack(spacing: 12) {
@@ -254,11 +326,27 @@ struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No project loaded")
                                 .font(.headline)
-                            Text("Paste a YouTube link and click Create Project to start clipping.")
-                                .foregroundStyle(.secondary)
+                            if store.ytdlpAvailable {
+                                Text("Paste a YouTube link above and click Create Project to auto-download and start editing immediately.")
+                                    .foregroundStyle(.secondary)
+                            } else {
+                                Text("Paste a YouTube link and click Create Project to start clipping.")
+                                    .foregroundStyle(.secondary)
+                            }
                             Text("You can also paste a direct MP4/MOV URL to create a project from raw footage.")
                                 .foregroundStyle(.secondary)
                                 .font(.caption)
+                            
+                            if store.ytdlpAvailable {
+                                HStack(spacing: 4) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text("Auto-download enabled (yt-dlp ready)")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
+                                .padding(.top, 4)
+                            }
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)

@@ -11,6 +11,7 @@ struct CliperTubeApp: App {
                 .environmentObject(store)
                 .environmentObject(youtubeStore)
         }
+        .defaultSize(width: 1400, height: 900)
         .windowStyle(.hiddenTitleBar)
         .windowToolbarStyle(.unified(showsTitle: true))
     }

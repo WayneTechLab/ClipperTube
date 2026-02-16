@@ -1,0 +1,24 @@
+{
+    "configurations": [
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:WTL-APP-CliperTube}",
+            "name": "Debug CliperTube",
+            "target": "CliperTube",
+            "configuration": "debug",
+            "preLaunchTask": "swift: Build Debug CliperTube"
+        },
+        {
+            "type": "swift",
+            "request": "launch",
+            "args": [],
+            "cwd": "${workspaceFolder:WTL-APP-CliperTube}",
+            "name": "Release CliperTube",
+            "target": "CliperTube",
+            "configuration": "release",
+            "preLaunchTask": "swift: Build Release CliperTube"
+        }
+    ]
+}

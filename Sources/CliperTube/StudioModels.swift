@@ -20,6 +20,7 @@ struct StudioProject: Identifiable, Codable {
     var exports: [ExportRecord]
     var transactions: [TransactionRecord]
     var benchmarkCoverage: [BenchmarkFeature]
+    var proTools: ProToolsData
 
     init(
         id: UUID,
@@ -40,7 +41,8 @@ struct StudioProject: Identifiable, Codable {
         timelineAudioClips: [TimelineAudioClip],
         exports: [ExportRecord],
         transactions: [TransactionRecord],
-        benchmarkCoverage: [BenchmarkFeature]
+        benchmarkCoverage: [BenchmarkFeature],
+        proTools: ProToolsData = .default
     ) {
         self.id = id
         self.title = title
@@ -61,6 +63,7 @@ struct StudioProject: Identifiable, Codable {
         self.exports = exports
         self.transactions = transactions
         self.benchmarkCoverage = benchmarkCoverage
+        self.proTools = proTools
     }
 
     enum CodingKeys: String, CodingKey {
@@ -83,6 +86,7 @@ struct StudioProject: Identifiable, Codable {
         case exports
         case transactions
         case benchmarkCoverage
+        case proTools
     }
 
     init(from decoder: Decoder) throws {
@@ -106,6 +110,7 @@ struct StudioProject: Identifiable, Codable {
         exports = try container.decode([ExportRecord].self, forKey: .exports)
         transactions = try container.decode([TransactionRecord].self, forKey: .transactions)
         benchmarkCoverage = try container.decode([BenchmarkFeature].self, forKey: .benchmarkCoverage)
+        proTools = try container.decodeIfPresent(ProToolsData.self, forKey: .proTools) ?? .default
     }
 }
 
@@ -283,11 +288,15 @@ enum StudioSection: String, CaseIterable, Identifiable {
     case dashboard
     case projects
     case youtube
+    case clipIntelligence
     case captions
     case timeline
     case voiceOver
+    case audioStudio
     case proEditor
+    case distribution
     case transactions
+    case revenueClients
     case benchmarks
 
     var id: String { rawValue }
@@ -297,11 +306,15 @@ enum StudioSection: String, CaseIterable, Identifiable {
         case .dashboard: return "Dashboard"
         case .projects: return "Projects + Outputs"
         case .youtube: return "YouTube Hub"
+        case .clipIntelligence: return "Clip Intelligence"
         case .captions: return "Captions"
         case .timeline: return "Video/Audio Timeline"
         case .voiceOver: return "Voice Over Timeline"
+        case .audioStudio: return "Audio Studio"
         case .proEditor: return "Pro Editor"
+        case .distribution: return "Distribution Center"
         case .transactions: return "Transactions"
+        case .revenueClients: return "Revenue & Clients"
         case .benchmarks: return "Top Clipper Benchmarks"
         }
     }

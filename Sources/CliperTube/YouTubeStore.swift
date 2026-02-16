@@ -52,6 +52,7 @@ final class YouTubeStore: ObservableObject {
     @Published var browserVideos: [YouTubeVideoInfo] = []
     @Published var selectedPreviewVideoID: String?
     @Published var lastUploadedVideoID: String?
+    @Published var uploadProgress: Double = 0
 
     private let fileManager = FileManager.default
     private let keychainService = "com.waynetechlab.clipertube.youtube"
@@ -271,6 +272,7 @@ final class YouTubeStore: ObservableObject {
 
         isBusy = true
         lastError = nil
+        uploadProgress = 0
         statusMessage = "Preparing YouTube upload..."
 
         do {
@@ -283,8 +285,9 @@ final class YouTubeStore: ObservableObject {
             )
 
             statusMessage = "Uploading video to YouTube..."
-            let videoID = try await uploadVideoBinary(uploadURL: uploadURL, fileURL: url)
+            let videoID = try await uploadVideoBinaryWithProgress(uploadURL: uploadURL, fileURL: url)
             lastUploadedVideoID = videoID
+            uploadProgress = 1.0
             statusMessage = "Upload complete. Video ID: \(videoID)"
             do {
                 try await loadRecentVideos()
@@ -300,6 +303,7 @@ final class YouTubeStore: ObservableObject {
         }
 
         isBusy = false
+        uploadProgress = 0
     }
 
     private func loadChannels() async throws {
@@ -453,6 +457,45 @@ final class YouTubeStore: ObservableObject {
         request.setValue(mimeType(for: fileURL), forHTTPHeaderField: "Content-Type")
 
         let (data, _) = try await authorizedUploadRequest(request, fromFile: fileURL)
+
+        let result = try JSONDecoder().decode(VideoInsertResponse.self, from: data)
+        return result.id
+    }
+
+    private func uploadVideoBinaryWithProgress(uploadURL: URL, fileURL: URL) async throws -> String {
+        var request = URLRequest(url: uploadURL)
+        request.httpMethod = "PUT"
+        request.setValue(mimeType(for: fileURL), forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(try await validAccessToken())", forHTTPHeaderField: "Authorization")
+
+        let fileSize = (try? fileURL.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+        let totalBytes = Int64(fileSize)
+
+        let delegate = UploadProgressDelegate { [weak self] bytesSent in
+            Task { @MainActor in
+                guard let self, totalBytes > 0 else { return }
+                self.uploadProgress = Double(bytesSent) / Double(totalBytes)
+                let percent = Int(self.uploadProgress * 100)
+                self.statusMessage = "Uploading to YouTube... \(percent)%"
+            }
+        }
+
+        let session = URLSession(configuration: .default, delegate: delegate, delegateQueue: nil)
+        defer { session.invalidateAndCancel() }
+
+        let (data, response) = try await session.upload(for: request, fromFile: fileURL)
+        guard let http = response as? HTTPURLResponse else {
+            throw YouTubeError.invalidResponse
+        }
+
+        if http.statusCode == 401, let token {
+            _ = try await refreshAccessToken(using: token)
+            return try await uploadVideoBinary(uploadURL: uploadURL, fileURL: fileURL)
+        }
+
+        guard (200...299).contains(http.statusCode) else {
+            throw parseErrorResponse(data: data, statusCode: http.statusCode)
+        }
 
         let result = try JSONDecoder().decode(VideoInsertResponse.self, from: data)
         return result.id
@@ -1006,5 +1049,23 @@ private extension String {
         var allowed = CharacterSet.alphanumerics
         allowed.insert(charactersIn: "-._~")
         return addingPercentEncoding(withAllowedCharacters: allowed) ?? self
+    }
+}
+
+private final class UploadProgressDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+    private let onProgress: @Sendable (Int64) -> Void
+
+    init(onProgress: @escaping @Sendable (Int64) -> Void) {
+        self.onProgress = onProgress
+    }
+
+    func urlSession(
+        _ session: URLSession,
+        task: URLSessionTask,
+        didSendBodyData bytesSent: Int64,
+        totalBytesSent: Int64,
+        totalBytesExpectedToSend: Int64
+    ) {
+        onProgress(totalBytesSent)
     }
 }

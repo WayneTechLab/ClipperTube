@@ -289,9 +289,9 @@ enum TimelineComposer {
     private static func presetName(for quality: RenderQuality) -> String {
         switch quality {
         case .standard:
-            return AVAssetExportPreset1280x720
-        case .high:
             return AVAssetExportPreset1920x1080
+        case .high:
+            return AVAssetExportPresetHighestQuality
         case .ultra:
             return AVAssetExportPreset3840x2160
         }

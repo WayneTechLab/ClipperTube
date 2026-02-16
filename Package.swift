@@ -10,7 +10,15 @@ let package = Package(
     targets: [
         .executableTarget(
             name: "CliperTube",
-            path: "Sources/CliperTube"
+            path: "Sources/CliperTube",
+            linkerSettings: [
+                .linkedFramework("AVKit"),
+                .linkedFramework("AVFoundation"),
+                .linkedFramework("WebKit"),
+                .linkedFramework("Security"),
+                .linkedFramework("AppKit"),
+                .linkedFramework("UniformTypeIdentifiers"),
+            ]
         )
     ]
 )

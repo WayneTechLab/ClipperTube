@@ -181,6 +181,23 @@ final class StudioStore: ObservableObject {
         persistWorkspace()
     }
 
+    func deleteProject(_ projectID: UUID) {
+        guard let index = projects.firstIndex(where: { $0.id == projectID }) else {
+            lastError = "Project not found."
+            return
+        }
+
+        let title = projects[index].title
+        projects.remove(at: index)
+
+        if activeProjectID == projectID {
+            activeProjectID = preferredActiveProject?.id
+        }
+
+        statusMessage = "Deleted project: \(title)."
+        persistWorkspace()
+    }
+
     func runAutoClipAndStitch(maxClips: Int = 6) {
         mutateActiveProject { project in
             project.clips = ClipEngine.autoStitch(from: project.transcriptSegments, maxClips: maxClips)
@@ -524,6 +541,352 @@ final class StudioStore: ObservableObject {
         lastError = nil
     }
 
+    // MARK: - Pro Tools Methods
+
+    func runViralAnalysis() {
+        mutateActiveProject { project in
+            project.proTools.viralScoreReports = ViralScoreEngine.analyze(clips: project.clips, transcript: project.transcriptSegments)
+        }
+        statusMessage = "Viral score analysis complete."
+    }
+
+    func runHookAnalysis() {
+        mutateActiveProject { project in
+            project.proTools.hookAnalyses = HookAnalyzer.analyze(clips: project.clips)
+        }
+        statusMessage = "Hook strength analysis complete."
+    }
+
+    func runTrendingMatch() {
+        mutateActiveProject { project in
+            project.proTools.trendingMatches = TrendingMatcher.match(transcript: project.transcriptSegments)
+        }
+        statusMessage = "Trending keyword scan complete."
+    }
+
+    func runRetentionEstimate() {
+        mutateActiveProject { project in
+            let duration = project.timelineVideoClips.map(\.timelineEnd).max() ?? project.clips.map(\.end).max() ?? 60
+            project.proTools.retentionCurve = RetentionEstimator.estimate(clips: project.clips, totalDuration: duration)
+        }
+        statusMessage = "Retention curve estimated."
+    }
+
+    func runABHookGeneration() {
+        mutateActiveProject { project in
+            project.proTools.abHookVariants = ABHookGenerator.generate(clips: project.clips)
+        }
+        statusMessage = "A/B hook variants generated."
+    }
+
+    func runOptimalLengthCalc() {
+        guard let project = activeProject else {
+            lastError = "Open a project first."
+            return
+        }
+        let duration = project.timelineVideoClips.map(\.timelineEnd).max() ?? project.clips.map(\.end).max() ?? 0
+        mutateActiveProject { project in
+            project.proTools.platformLengthRecs = OptimalLengthCalculator.calculate(currentDuration: duration)
+        }
+        statusMessage = "Platform length recommendations ready."
+    }
+
+    func runEngagementMapping() {
+        mutateActiveProject { project in
+            let duration = project.timelineVideoClips.map(\.timelineEnd).max() ?? project.clips.map(\.end).max() ?? 60
+            project.proTools.engagementZones = EngagementMapper.map(clips: project.clips, totalDuration: duration)
+        }
+        statusMessage = "Engagement heatmap generated."
+    }
+
+    func duplicateProjectForReClip() {
+        guard let source = activeProject else {
+            lastError = "Open a project first."
+            return
+        }
+        var copy = source
+        copy.id = UUID()
+        copy.title = "\(source.title) (Re-Clip)"
+        copy.createdAt = Date()
+        copy.updatedAt = Date()
+        copy.status = .working
+        copy.exports = []
+        copy.proTools = .default
+        projects.insert(copy, at: 0)
+        persistWorkspace()
+        statusMessage = "Re-clip project created: \(copy.title)."
+    }
+
+    func detectPowerWords() {
+        mutateActiveProject { project in
+            project.proTools.powerWords = PowerWordDetector.detect(captions: project.captions)
+        }
+        statusMessage = "Power words detected."
+    }
+
+    func runVoiceActivityDetection() {
+        mutateActiveProject { project in
+            let duration = project.timelineVideoClips.map(\.timelineEnd).max() ?? project.clips.map(\.end).max() ?? 60
+            project.proTools.voiceActivitySegments = VoiceActivityDetector.detect(transcript: project.transcriptSegments, totalDuration: duration)
+        }
+        statusMessage = "Voice activity segments detected."
+    }
+
+    func addSFXTrigger(at timestamp: TimeInterval, type: SFXType) {
+        mutateActiveProject { project in
+            project.proTools.sfxTriggers.append(SFXTrigger(
+                id: UUID(),
+                timestamp: timestamp,
+                sfxType: type,
+                volume: 0.8,
+                label: type.rawValue
+            ))
+            project.proTools.sfxTriggers.sort { $0.timestamp < $1.timestamp }
+        }
+        statusMessage = "SFX trigger added."
+    }
+
+    func removeSFXTrigger(_ triggerID: UUID) {
+        mutateActiveProject { project in
+            project.proTools.sfxTriggers.removeAll { $0.id == triggerID }
+        }
+    }
+
+    func addZoomRegion(start: TimeInterval, end: TimeInterval, factor: Double) {
+        mutateActiveProject { project in
+            project.proTools.zoomRegions.append(ZoomRegion(
+                id: UUID(),
+                start: start,
+                end: end,
+                zoomFactor: factor,
+                focusX: 0.5,
+                focusY: 0.5
+            ))
+        }
+        statusMessage = "Zoom region added."
+    }
+
+    func removeZoomRegion(_ regionID: UUID) {
+        mutateActiveProject { project in
+            project.proTools.zoomRegions.removeAll { $0.id == regionID }
+        }
+    }
+
+    func addSpeedRampPoint(at timestamp: TimeInterval, speed: Double) {
+        mutateActiveProject { project in
+            project.proTools.speedRampPoints.append(SpeedRampPoint(
+                id: UUID(),
+                timestamp: timestamp,
+                targetSpeed: speed,
+                rampDuration: 0.5
+            ))
+            project.proTools.speedRampPoints.sort { $0.timestamp < $1.timestamp }
+        }
+        statusMessage = "Speed ramp point added."
+    }
+
+    func removeSpeedRampPoint(_ pointID: UUID) {
+        mutateActiveProject { project in
+            project.proTools.speedRampPoints.removeAll { $0.id == pointID }
+        }
+    }
+
+    func generateSocialCopy() {
+        guard let project = activeProject else {
+            lastError = "Open a project first."
+            return
+        }
+        mutateActiveProject { proj in
+            proj.proTools.socialCopies = SocialCopyGenerator.generate(project: project)
+        }
+        statusMessage = "Social copy generated for all platforms."
+    }
+
+    func addThumbnailCandidate(at timestamp: TimeInterval) {
+        mutateActiveProject { project in
+            project.proTools.thumbnailCandidates.append(ThumbnailCandidate(
+                id: UUID(),
+                timestamp: timestamp,
+                label: "Frame at \(Int(timestamp))s",
+                isSelected: project.proTools.thumbnailCandidates.isEmpty
+            ))
+        }
+        statusMessage = "Thumbnail candidate added."
+    }
+
+    func selectThumbnailCandidate(_ candidateID: UUID) {
+        mutateActiveProject { project in
+            for i in project.proTools.thumbnailCandidates.indices {
+                project.proTools.thumbnailCandidates[i].isSelected = (project.proTools.thumbnailCandidates[i].id == candidateID)
+            }
+        }
+    }
+
+    func addBatchExportItem(platform: ExportPlatform, quality: RenderQuality, aspect: AspectRatio) {
+        mutateActiveProject { project in
+            project.proTools.batchExportQueue.append(BatchExportItem(
+                id: UUID(),
+                platform: platform,
+                quality: quality,
+                aspectRatio: aspect,
+                includeCaptions: true,
+                status: .queued
+            ))
+        }
+        statusMessage = "Added \(platform.rawValue) to batch export queue."
+    }
+
+    func removeBatchExportItem(_ itemID: UUID) {
+        mutateActiveProject { project in
+            project.proTools.batchExportQueue.removeAll { $0.id == itemID }
+        }
+    }
+
+    func saveExportTemplate(name: String) {
+        guard let project = activeProject else { return }
+        mutateActiveProject { proj in
+            proj.proTools.exportTemplates.append(ExportTemplate(
+                id: UUID(),
+                name: name,
+                preset: exportPreset,
+                editorSnapshot: project.editor,
+                createdAt: Date()
+            ))
+        }
+        statusMessage = "Export template '\(name)' saved."
+    }
+
+    func addScheduleEntry(platform: ExportPlatform, date: Date, title: String) {
+        mutateActiveProject { project in
+            project.proTools.publishSchedule.append(PublishScheduleEntry(
+                id: UUID(),
+                platform: platform,
+                scheduledDate: date,
+                title: title,
+                status: .planned,
+                notes: ""
+            ))
+            project.proTools.publishSchedule.sort { $0.scheduledDate < $1.scheduledDate }
+        }
+        statusMessage = "Schedule entry added."
+    }
+
+    func updateScheduleStatus(_ entryID: UUID, status: PublishStatus) {
+        mutateActiveProject { project in
+            guard let i = project.proTools.publishSchedule.firstIndex(where: { $0.id == entryID }) else { return }
+            project.proTools.publishSchedule[i].status = status
+        }
+    }
+
+    func addClipRevenue(clipTitle: String, platform: ExportPlatform, views: Int, revenue: Double) {
+        mutateActiveProject { project in
+            project.proTools.clipRevenue.insert(ClipRevenueEntry(
+                id: UUID(),
+                clipTitle: clipTitle,
+                platform: platform,
+                views: views,
+                revenue: revenue,
+                currency: "USD",
+                recordedAt: Date()
+            ), at: 0)
+        }
+        statusMessage = "Revenue entry recorded."
+    }
+
+    func addCostEntry(category: CostCategory, amount: Double, description: String) {
+        mutateActiveProject { project in
+            project.proTools.costs.insert(CostEntry(
+                id: UUID(),
+                category: category,
+                amount: amount,
+                currency: "USD",
+                description: description,
+                date: Date()
+            ), at: 0)
+        }
+        statusMessage = "Cost entry recorded."
+    }
+
+    func addClient(name: String, email: String, notes: String) {
+        mutateActiveProject { project in
+            project.proTools.clients.append(ClientRecord(
+                id: UUID(),
+                name: name,
+                contactEmail: email,
+                projectCount: 0,
+                totalRevenue: 0,
+                notes: notes,
+                createdAt: Date()
+            ))
+        }
+        statusMessage = "Client '\(name)' added."
+    }
+
+    func addInvoice(clientName: String, items: [InvoiceLineItem], notes: String) {
+        let total = items.reduce(0) { $0 + $1.total }
+        let invoiceNumber = "INV-\(timestamp())"
+        mutateActiveProject { project in
+            project.proTools.invoices.insert(InvoiceRecord(
+                id: UUID(),
+                clientID: project.proTools.clients.first(where: { $0.name == clientName })?.id,
+                clientName: clientName,
+                invoiceNumber: invoiceNumber,
+                items: items,
+                totalAmount: total,
+                currency: "USD",
+                status: .draft,
+                issuedDate: Date(),
+                dueDate: Date().addingTimeInterval(30 * 86400),
+                notes: notes
+            ), at: 0)
+        }
+        statusMessage = "Invoice \(invoiceNumber) created."
+    }
+
+    func updateInvoiceStatus(_ invoiceID: UUID, status: InvoiceStatus) {
+        mutateActiveProject { project in
+            guard let i = project.proTools.invoices.firstIndex(where: { $0.id == invoiceID }) else { return }
+            project.proTools.invoices[i].status = status
+        }
+    }
+
+    func startEditingSession() {
+        mutateActiveProject { project in
+            project.proTools.editingSessions.insert(EditingSession(
+                id: UUID(),
+                projectID: project.id,
+                startTime: Date(),
+                endTime: nil,
+                durationMinutes: 0,
+                clipsProduced: 0,
+                notes: ""
+            ), at: 0)
+        }
+        statusMessage = "Editing session started."
+    }
+
+    func endEditingSession(clipsProduced: Int) {
+        mutateActiveProject { project in
+            guard let i = project.proTools.editingSessions.firstIndex(where: { $0.endTime == nil }) else { return }
+            project.proTools.editingSessions[i].endTime = Date()
+            let elapsed = Date().timeIntervalSince(project.proTools.editingSessions[i].startTime)
+            project.proTools.editingSessions[i].durationMinutes = elapsed / 60
+            project.proTools.editingSessions[i].clipsProduced = clipsProduced
+        }
+        statusMessage = "Editing session ended."
+    }
+
+    func proToolsBinding<T>(for keyPath: WritableKeyPath<ProToolsData, T>, fallback: T) -> Binding<T> {
+        Binding(
+            get: { self.activeProject?.proTools[keyPath: keyPath] ?? fallback },
+            set: { newValue in
+                self.mutateActiveProject { project in
+                    project.proTools[keyPath: keyPath] = newValue
+                }
+            }
+        )
+    }
+
     func timelineDuration(for project: StudioProject?) -> TimeInterval {
         guard let project else { return 0 }
 
@@ -850,6 +1213,10 @@ final class StudioStore: ObservableObject {
         } catch {
             lastError = "Failed to load workspace: \(error.localizedDescription)"
         }
+    }
+
+    func mutateActiveProjectPublic(_ mutation: (inout StudioProject) -> Void) {
+        mutateActiveProject(mutation)
     }
 
     private func mutateActiveProject(_ mutation: (inout StudioProject) -> Void) {

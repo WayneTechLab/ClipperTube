@@ -34,11 +34,15 @@ struct StudioRootView: View {
         VStack(alignment: .leading, spacing: 8) {
             Text("Cliper Tube")
                 .font(.title2.weight(.bold))
-                .padding(.bottom, 6)
+                .padding(.bottom, 2)
 
             Text("Wayne Tech Lab LLC")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+
+            Text("v1.1.0")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
                 .padding(.bottom, 12)
 
             ForEach(StudioSection.allCases) { section in
@@ -60,6 +64,18 @@ struct StudioRootView: View {
             }
 
             Spacer(minLength: 0)
+
+            if let project = store.activeProject {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(project.title)
+                        .font(.caption.weight(.medium))
+                        .lineLimit(1)
+                    Text("\(project.timelineVideoClips.count) clips • \(project.mediaSources.count) sources")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.bottom, 4)
+            }
         }
         .padding(16)
         .frame(width: 260)
@@ -74,16 +90,24 @@ struct StudioRootView: View {
             ProjectsView()
         case .youtube:
             YouTubeHubView()
+        case .clipIntelligence:
+            ClipIntelligenceView()
         case .captions:
             CaptionsView()
         case .timeline:
             TimelineView()
         case .voiceOver:
             VoiceOverView()
+        case .audioStudio:
+            AudioStudioView()
         case .proEditor:
             ProEditorView()
+        case .distribution:
+            DistributionCenterView()
         case .transactions:
             TransactionsView()
+        case .revenueClients:
+            RevenueClientsView()
         case .benchmarks:
             BenchmarksView()
         }
@@ -105,11 +129,15 @@ struct StudioRootView: View {
         case .dashboard: return "rectangle.3.group.bubble.left"
         case .projects: return "shippingbox"
         case .youtube: return "play.tv"
+        case .clipIntelligence: return "brain.head.profile"
         case .captions: return "captions.bubble"
         case .timeline: return "timeline.selection"
         case .voiceOver: return "waveform"
+        case .audioStudio: return "hifispeaker.2"
         case .proEditor: return "slider.horizontal.3"
+        case .distribution: return "paperplane"
         case .transactions: return "creditcard"
+        case .revenueClients: return "chart.line.uptrend.xyaxis"
         case .benchmarks: return "chart.bar.doc.horizontal"
         }
     }
@@ -167,7 +195,18 @@ struct DashboardView: View {
 
                         Spacer()
 
-                        Button("Open Projects + Outputs") {
+                        Button("Export") {
+                            store.selectedSection = .transactions
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(project.timelineVideoClips.isEmpty || store.isExporting)
+
+                        Button("Timeline") {
+                            store.selectedSection = .timeline
+                        }
+                        .buttonStyle(.bordered)
+
+                        Button("Projects + Outputs") {
                             store.selectedSection = .projects
                         }
                         .buttonStyle(.bordered)
@@ -215,8 +254,11 @@ struct DashboardView: View {
                         VStack(alignment: .leading, spacing: 10) {
                             Text("No project loaded")
                                 .font(.headline)
-                            Text("Paste a YouTube link and click Create Project, then manage Current/Working/Past projects in Projects + Outputs.")
+                            Text("Paste a YouTube link and click Create Project to start clipping.")
                                 .foregroundStyle(.secondary)
+                            Text("You can also paste a direct MP4/MOV URL to create a project from raw footage.")
+                                .foregroundStyle(.secondary)
+                                .font(.caption)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(4)
@@ -275,7 +317,7 @@ struct ProjectsView: View {
 
                 GroupBox("All Project Outputs") {
                     if store.outputHistory.isEmpty {
-                        Text("No outputs yet. Export from Transactions to generate output bundles.")
+                        Text("No outputs yet. Open Transactions and Exports to render your first video bundle.")
                             .foregroundStyle(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .padding(.vertical, 4)
@@ -507,7 +549,7 @@ struct YouTubeHubView: View {
 
                     VStack(alignment: .leading, spacing: 10) {
                         if candidates.isEmpty {
-                            Text("No rendered video exports found. Export from Transactions first.")
+                            Text("No rendered video exports found. Export a video from the Transactions and Exports section first.")
                                 .foregroundStyle(.secondary)
                         } else {
                             Picker(
@@ -562,6 +604,16 @@ struct YouTubeHubView: View {
                                         store.revealOutput(path: selected.filePath)
                                     }
                                     .buttonStyle(.bordered)
+                                }
+                            }
+
+                            if youtube.isBusy, youtube.uploadProgress > 0 {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ProgressView(value: youtube.uploadProgress)
+                                        .progressViewStyle(.linear)
+                                    Text(String(format: "%.0f%% uploaded", youtube.uploadProgress * 100))
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
                                 }
                             }
                         }
@@ -742,6 +794,7 @@ struct YouTubeHubView: View {
 
 struct ProjectBucketView: View {
     @EnvironmentObject private var store: StudioStore
+    @State private var projectToDelete: UUID?
 
     var title: String
     var projects: [StudioProject]
@@ -812,6 +865,14 @@ struct ProjectBucketView: View {
                                     }
                                     .buttonStyle(.bordered)
                                 }
+
+                                Spacer()
+
+                                Button("Delete") {
+                                    projectToDelete = project.id
+                                }
+                                .buttonStyle(.bordered)
+                                .foregroundStyle(.red)
                             }
                         }
                         if project.id != projects.last?.id {
@@ -821,6 +882,22 @@ struct ProjectBucketView: View {
                 }
                 .padding(.vertical, 4)
             }
+        }
+        .alert("Delete Project", isPresented: Binding(
+            get: { projectToDelete != nil },
+            set: { if !$0 { projectToDelete = nil } }
+        )) {
+            Button("Cancel", role: .cancel) {
+                projectToDelete = nil
+            }
+            Button("Delete", role: .destructive) {
+                if let id = projectToDelete {
+                    store.deleteProject(id)
+                }
+                projectToDelete = nil
+            }
+        } message: {
+            Text("This will permanently remove the project and all its data. Exported files on disk will not be deleted.")
         }
     }
 
@@ -834,50 +911,247 @@ struct ProjectBucketView: View {
 
 struct CaptionsView: View {
     @EnvironmentObject private var store: StudioStore
+    @State private var emojiText: String = ""
+    @State private var emojiPosition: EmojiPosition = .after
+    @State private var selectedCaptionIDForEmoji: UUID?
+    @State private var newLanguageCode: String = ""
+    @State private var newLanguageName: String = ""
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            Text("Captation and Subtitle Studio")
-                .font(.title2.weight(.bold))
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("Caption and Subtitle Studio")
+                    .font(.title2.weight(.bold))
 
-            HStack {
-                Picker("Style", selection: $store.selectedCaptionStyle) {
-                    ForEach(CaptionStyle.allCases) { style in
-                        Text(style.label).tag(style)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                Button("Regenerate Captions") {
-                    store.regenerateCaptions()
-                }
-                .buttonStyle(.borderedProminent)
-            }
-
-            if let project = store.activeProject {
-                List(project.captions.prefix(80)) { caption in
-                    VStack(alignment: .leading, spacing: 5) {
-                        HStack {
-                            Text("\(timeString(caption.start)) - \(timeString(caption.end))")
-                                .font(.caption.monospacedDigit())
-                                .foregroundStyle(.secondary)
-                            Text(caption.style.label)
-                                .font(.caption)
-                                .padding(.horizontal, 6)
-                                .padding(.vertical, 2)
-                                .background(Color.secondary.opacity(0.12))
-                                .clipShape(RoundedRectangle(cornerRadius: 6))
+                HStack {
+                    Picker("Style", selection: $store.selectedCaptionStyle) {
+                        ForEach(CaptionStyle.allCases) { style in
+                            Text(style.label).tag(style)
                         }
-                        Text(caption.text)
-                            .font(.body)
                     }
-                    .padding(.vertical, 2)
+                    .pickerStyle(.segmented)
+
+                    Button("Regenerate Captions") {
+                        store.regenerateCaptions()
+                    }
+                    .buttonStyle(.borderedProminent)
                 }
-            } else {
-                emptyProjectText
+
+                if let project = store.activeProject {
+                    GroupBox("Word Highlight Mode") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Control how individual words are highlighted during caption playback.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Picker("Highlight", selection: store.proToolsBinding(for: \.captionHighlightMode, fallback: .none)) {
+                                ForEach(CaptionHighlightMode.allCases) { mode in
+                                    Text(mode.rawValue).tag(mode)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+
+                    GroupBox("Caption Animation Style") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Choose how captions animate onto screen during playback and export.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Picker("Animation", selection: store.proToolsBinding(for: \.captionAnimation, fallback: .none)) {
+                                ForEach(CaptionAnimation.allCases) { anim in
+                                    Text(anim.rawValue).tag(anim)
+                                }
+                            }
+                            .pickerStyle(.segmented)
+                        }
+                    }
+
+                    GroupBox("Emoji Auto-Insert") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Add emoji markers to specific captions for visual emphasis.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                Picker("Caption", selection: Binding(
+                                    get: { selectedCaptionIDForEmoji ?? project.captions.first?.id ?? UUID() },
+                                    set: { selectedCaptionIDForEmoji = $0 }
+                                )) {
+                                    ForEach(project.captions.prefix(30)) { cap in
+                                        Text("\(timeString(cap.start)) \(cap.text.prefix(30))").tag(cap.id)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+                                .frame(maxWidth: 280)
+
+                                TextField("Emoji", text: $emojiText)
+                                    .textFieldStyle(.roundedBorder)
+                                    .frame(width: 60)
+
+                                Picker("Position", selection: $emojiPosition) {
+                                    ForEach(EmojiPosition.allCases) { pos in
+                                        Text(pos.rawValue).tag(pos)
+                                    }
+                                }
+                                .pickerStyle(.menu)
+
+                                Button("Add Emoji") {
+                                    let captionID = selectedCaptionIDForEmoji ?? project.captions.first?.id ?? UUID()
+                                    guard emojiText.isEmpty == false else { return }
+                                    store.mutateActiveProjectPublic { proj in
+                                        proj.proTools.emojiInserts.append(EmojiInsertPoint(
+                                            id: UUID(),
+                                            captionID: captionID,
+                                            emoji: emojiText,
+                                            position: emojiPosition
+                                        ))
+                                    }
+                                    emojiText = ""
+                                }
+                                .buttonStyle(.bordered)
+                            }
+
+                            if let inserts = store.activeProject?.proTools.emojiInserts, !inserts.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(inserts) { insert in
+                                        HStack {
+                                            Text("\(insert.emoji) (\(insert.position.rawValue))")
+                                                .font(.caption)
+                                            Spacer()
+                                            Button("Remove") {
+                                                store.mutateActiveProjectPublic { proj in
+                                                    proj.proTools.emojiInserts.removeAll { $0.id == insert.id }
+                                                }
+                                            }
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Multi-Language Stubs") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Track localized caption versions for international distribution.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                TextField("Code (e.g. es)", text: $newLanguageCode)
+                                    .textFieldStyle(.roundedBorder).frame(width: 80)
+                                TextField("Language Name", text: $newLanguageName)
+                                    .textFieldStyle(.roundedBorder).frame(width: 140)
+                                Button("Add Language") {
+                                    let code = newLanguageCode.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    let name = newLanguageName.trimmingCharacters(in: .whitespacesAndNewlines)
+                                    guard !code.isEmpty, !name.isEmpty else { return }
+                                    store.mutateActiveProjectPublic { proj in
+                                        proj.proTools.languageStubs.append(LanguageStub(
+                                            id: UUID(),
+                                            languageCode: code,
+                                            languageName: name,
+                                            captionCount: proj.captions.count,
+                                            exported: false
+                                        ))
+                                    }
+                                    newLanguageCode = ""
+                                    newLanguageName = ""
+                                }
+                                .buttonStyle(.bordered)
+                            }
+
+                            if let stubs = store.activeProject?.proTools.languageStubs, !stubs.isEmpty {
+                                VStack(alignment: .leading, spacing: 4) {
+                                    ForEach(stubs) { stub in
+                                        HStack {
+                                            Text("\(stub.languageName) (\(stub.languageCode))")
+                                                .font(.caption.weight(.medium))
+                                            Text("\(stub.captionCount) captions")
+                                                .font(.caption).foregroundStyle(.secondary)
+                                            Text(stub.exported ? "Exported" : "Pending")
+                                                .font(.caption.weight(.semibold))
+                                                .padding(.horizontal, 6).padding(.vertical, 2)
+                                                .background((stub.exported ? Color.green : Color.orange).opacity(0.16))
+                                                .clipShape(Capsule())
+                                            Spacer()
+                                            Button("Mark Exported") {
+                                                store.mutateActiveProjectPublic { proj in
+                                                    if let i = proj.proTools.languageStubs.firstIndex(where: { $0.id == stub.id }) {
+                                                        proj.proTools.languageStubs[i].exported = true
+                                                    }
+                                                }
+                                            }
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                            .disabled(stub.exported)
+                                            Button("Remove") {
+                                                store.mutateActiveProjectPublic { proj in
+                                                    proj.proTools.languageStubs.removeAll { $0.id == stub.id }
+                                                }
+                                            }
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Power Words Emphasis") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Detect high-impact words in your captions for visual emphasis during render.")
+                                .font(.caption).foregroundStyle(.secondary)
+
+                            Button("Detect Power Words") {
+                                store.detectPowerWords()
+                            }
+                            .buttonStyle(.borderedProminent)
+
+                            if let words = store.activeProject?.proTools.powerWords, !words.isEmpty {
+                                HStack(alignment: .top, spacing: 6) {
+                                    ForEach(words.prefix(15)) { pw in
+                                        VStack(spacing: 2) {
+                                            Text(pw.word)
+                                                .font(.caption.weight(.bold))
+                                            Text(String(format: "%.0f%%", pw.weight * 100))
+                                                .font(.caption2.monospacedDigit())
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        .padding(.horizontal, 8).padding(.vertical, 4)
+                                        .background(Color.blue.opacity(0.08 + pw.weight * 0.12))
+                                        .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Caption Preview") {
+                        VStack(alignment: .leading, spacing: 6) {
+                            ForEach(project.captions.prefix(40)) { caption in
+                                VStack(alignment: .leading, spacing: 5) {
+                                    HStack {
+                                        Text("\(timeString(caption.start)) - \(timeString(caption.end))")
+                                            .font(.caption.monospacedDigit())
+                                            .foregroundStyle(.secondary)
+                                        Text(caption.style.label)
+                                            .font(.caption)
+                                            .padding(.horizontal, 6)
+                                            .padding(.vertical, 2)
+                                            .background(Color.secondary.opacity(0.12))
+                                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                                    }
+                                    Text(caption.text)
+                                        .font(.body)
+                                }
+                                .padding(.vertical, 2)
+                                if caption.id != project.captions.prefix(40).last?.id {
+                                    Divider()
+                                }
+                            }
+                        }
+                        .padding(.vertical, 4)
+                    }
+                } else {
+                    emptyProjectText
+                }
             }
+            .padding(22)
         }
-        .padding(22)
     }
 
     private var emptyProjectText: some View {
@@ -978,9 +1252,9 @@ struct TimelineView: View {
 
                     GroupBox("Preview Monitor") {
                         VStack(spacing: 10) {
-                            VideoPlayer(player: player)
+                            NativeVideoPlayerView(player: player)
                                 .frame(height: 340)
-                                .background(Color.black.opacity(0.2))
+                                .background(Color.black)
                                 .clipShape(RoundedRectangle(cornerRadius: 12))
 
                             HStack(spacing: 8) {
@@ -1195,43 +1469,52 @@ struct TimelineView: View {
         }
         .fileImporter(
             isPresented: $primaryVideoImporterPresented,
-            allowedContentTypes: [.movie],
+            allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie],
             allowsMultipleSelection: false
         ) { result in
             guard case .success(let urls) = result,
                   let url = urls.first else {
                 return
             }
+            let accessed = url.startAccessingSecurityScopedResource()
+            let path = url.path
             Task { @MainActor in
-                await store.importPrimaryVideo(filePath: url.path)
+                await store.importPrimaryVideo(filePath: path)
+                if accessed { url.stopAccessingSecurityScopedResource() }
                 reloadPreview()
             }
         }
         .fileImporter(
             isPresented: $secondaryVideoImporterPresented,
-            allowedContentTypes: [.movie],
+            allowedContentTypes: [.movie, .mpeg4Movie, .quickTimeMovie],
             allowsMultipleSelection: false
         ) { result in
             guard case .success(let urls) = result,
                   let url = urls.first else {
                 return
             }
+            let accessed = url.startAccessingSecurityScopedResource()
+            let path = url.path
             Task { @MainActor in
-                await store.importSecondaryVideo(filePath: url.path)
+                await store.importSecondaryVideo(filePath: path)
+                if accessed { url.stopAccessingSecurityScopedResource() }
                 reloadPreview()
             }
         }
         .fileImporter(
             isPresented: $audioImporterPresented,
-            allowedContentTypes: [.audio],
+            allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav, .aiff],
             allowsMultipleSelection: false
         ) { result in
             guard case .success(let urls) = result,
                   let url = urls.first else {
                 return
             }
+            let accessed = url.startAccessingSecurityScopedResource()
+            let path = url.path
             Task { @MainActor in
-                await store.importTimelineAudio(filePath: url.path)
+                await store.importTimelineAudio(filePath: path)
+                if accessed { url.stopAccessingSecurityScopedResource() }
                 reloadPreview()
             }
         }
@@ -1503,7 +1786,7 @@ struct VoiceOverView: View {
         .padding(22)
         .fileImporter(
             isPresented: $importerPresented,
-            allowedContentTypes: [.audio],
+            allowedContentTypes: [.audio, .mp3, .mpeg4Audio, .wav, .aiff],
             allowsMultipleSelection: false
         ) { result in
             guard case .success(let urls) = result,
@@ -1511,7 +1794,9 @@ struct VoiceOverView: View {
                   let url = urls.first else {
                 return
             }
+            let accessed = url.startAccessingSecurityScopedResource()
             store.attachVoiceOverAudio(selectedID, filePath: url.path)
+            if accessed { url.stopAccessingSecurityScopedResource() }
         }
     }
 
@@ -1525,6 +1810,11 @@ struct VoiceOverView: View {
 
 struct ProEditorView: View {
     @EnvironmentObject private var store: StudioStore
+    @State private var rampTimestamp: String = ""
+    @State private var rampSpeed: String = "1.5"
+    @State private var zoomStart: String = ""
+    @State private var zoomEnd: String = ""
+    @State private var zoomFactor: String = "1.5"
 
     var body: some View {
         ScrollView {
@@ -1574,12 +1864,134 @@ struct ProEditorView: View {
                             Toggle("Color Boost", isOn: store.editorBinding(for: \.colorBoost, fallback: true))
                         }
                     }
+
+                    GroupBox("Speed Ramp Editor") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Add dynamic speed changes at specific timestamps.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                TextField("Timestamp (s)", text: $rampTimestamp)
+                                    .textFieldStyle(.roundedBorder).frame(width: 120)
+                                TextField("Target Speed", text: $rampSpeed)
+                                    .textFieldStyle(.roundedBorder).frame(width: 120)
+                                Button("Add Ramp Point") {
+                                    if let t = Double(rampTimestamp), let s = Double(rampSpeed) {
+                                        store.addSpeedRampPoint(at: t, speed: s)
+                                        rampTimestamp = ""
+                                    }
+                                }.buttonStyle(.bordered)
+                            }
+                            if let pts = store.activeProject?.proTools.speedRampPoints, !pts.isEmpty {
+                                ForEach(pts) { pt in
+                                    HStack {
+                                        Text(String(format: "%.1fs -> %.2fx (ramp %.1fs)", pt.timestamp, pt.targetSpeed, pt.rampDuration))
+                                            .font(.caption.monospacedDigit())
+                                        Spacer()
+                                        Button("Remove") { store.removeSpeedRampPoint(pt.id) }
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Auto-Zoom Regions") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("Define zoom-in points on your timeline for emphasis.")
+                                .font(.caption).foregroundStyle(.secondary)
+                            HStack {
+                                TextField("Start (s)", text: $zoomStart)
+                                    .textFieldStyle(.roundedBorder).frame(width: 100)
+                                TextField("End (s)", text: $zoomEnd)
+                                    .textFieldStyle(.roundedBorder).frame(width: 100)
+                                TextField("Zoom Factor", text: $zoomFactor)
+                                    .textFieldStyle(.roundedBorder).frame(width: 100)
+                                Button("Add Zoom") {
+                                    if let s = Double(zoomStart), let e = Double(zoomEnd), let f = Double(zoomFactor) {
+                                        store.addZoomRegion(start: s, end: e, factor: f)
+                                        zoomStart = ""; zoomEnd = ""
+                                    }
+                                }.buttonStyle(.bordered)
+                            }
+                            if let regions = store.activeProject?.proTools.zoomRegions, !regions.isEmpty {
+                                ForEach(regions) { r in
+                                    HStack {
+                                        Text(String(format: "%.1fs - %.1fs @ %.1fx", r.start, r.end, r.zoomFactor))
+                                            .font(.caption.monospacedDigit())
+                                        Spacer()
+                                        Button("Remove") { store.removeZoomRegion(r.id) }
+                                            .buttonStyle(.bordered).controlSize(.small)
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Ken Burns Motion") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Enable Ken Burns", isOn: store.proToolsBinding(for: \.kenBurns.enabled, fallback: false))
+                            HStack {
+                                Picker("Pan Direction", selection: store.proToolsBinding(for: \.kenBurns.panDirection, fallback: .leftToRight)) {
+                                    ForEach(PanDirection.allCases) { d in Text(d.rawValue).tag(d) }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Picture-in-Picture") {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Toggle("Enable PiP", isOn: store.proToolsBinding(for: \.pip.enabled, fallback: false))
+                            if store.activeProject?.proTools.pip.enabled == true {
+                                Picker("Position", selection: store.proToolsBinding(for: \.pip.position, fallback: .bottomRight)) {
+                                    ForEach(PiPPosition.allCases) { p in Text(p.rawValue).tag(p) }
+                                }
+                            }
+                        }
+                    }
+
+                    GroupBox("Split Screen") {
+                        Picker("Layout", selection: store.proToolsBinding(for: \.splitScreen, fallback: .none)) {
+                            ForEach(SplitScreenLayout.allCases) { l in Text(l.rawValue).tag(l) }
+                        }
+                    }
+
+                    GroupBox("Color Grade") {
+                        Picker("Preset", selection: store.proToolsBinding(for: \.colorGrade, fallback: .none)) {
+                            ForEach(ColorGradePreset.allCases) { c in Text(c.rawValue).tag(c) }
+                        }
+                    }
+
+                    GroupBox("Platform Safe Zones") {
+                        Text("Safe zone guides overlay on export preview per platform crop.")
+                            .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 12) {
+                            ForEach(ExportPlatform.allCases) { platform in
+                                VStack {
+                                    Text(platform.rawValue).font(.caption.weight(.medium))
+                                    Text(safeZoneLabel(for: platform)).font(.caption2).foregroundStyle(.secondary)
+                                }
+                                .padding(8)
+                                .background(Color.secondary.opacity(0.08))
+                                .clipShape(RoundedRectangle(cornerRadius: 8))
+                            }
+                        }
+                    }
                 } else {
                     Text("Create or open a project first to tune editor controls.")
                         .foregroundStyle(.secondary)
                 }
             }
             .padding(22)
+        }
+    }
+
+    private func safeZoneLabel(for platform: ExportPlatform) -> String {
+        switch platform {
+        case .youtubeShorts: return "Top 15% / Bottom 25% unsafe"
+        case .tiktok: return "Top 10% / Bottom 30% unsafe"
+        case .instagramReels: return "Top 12% / Bottom 20% unsafe"
+        case .x: return "Full frame safe"
+        case .linkedin: return "Full frame safe"
         }
     }
 }
@@ -1596,27 +2008,34 @@ struct TransactionsView: View {
                 .font(.title2.weight(.bold))
 
             GroupBox("Export Preset") {
-                HStack {
-                    Picker("Platform", selection: platformBinding) {
-                        ForEach(ExportPlatform.allCases) { platform in
-                            Text(platform.rawValue).tag(platform)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Picker("Platform", selection: platformBinding) {
+                            ForEach(ExportPlatform.allCases) { platform in
+                                Text(platform.rawValue).tag(platform)
+                            }
                         }
-                    }
 
-                    Picker("Quality", selection: qualityBinding) {
-                        ForEach(RenderQuality.allCases) { quality in
-                            Text(quality.rawValue).tag(quality)
+                        Picker("Quality", selection: qualityBinding) {
+                            ForEach(RenderQuality.allCases) { quality in
+                                Text(quality.rawValue).tag(quality)
+                            }
                         }
+
+                        Toggle("Captions", isOn: includeCaptionsBinding)
+                        Toggle("Voice Over", isOn: includeVoiceOverBinding)
+
+                        Button(store.isExporting ? "Exporting..." : "Export Bundle") {
+                            store.exportCurrentProject()
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(store.isExporting || store.activeProject == nil)
                     }
 
-                    Toggle("Captions", isOn: includeCaptionsBinding)
-                    Toggle("Voice Over", isOn: includeVoiceOverBinding)
-
-                    Button(store.isExporting ? "Exporting..." : "Export Bundle") {
-                        store.exportCurrentProject()
+                    if store.isExporting {
+                        ProgressView()
+                            .progressViewStyle(.linear)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(store.isExporting || store.activeProject == nil)
                 }
             }
 
@@ -1769,11 +2188,31 @@ struct MetricCard: View {
     }
 }
 
+struct NativeVideoPlayerView: NSViewRepresentable {
+    var player: AVPlayer
+
+    func makeNSView(context: Context) -> AVPlayerView {
+        let view = AVPlayerView()
+        view.player = player
+        view.controlsStyle = .floating
+        view.showsFullScreenToggleButton = true
+        return view
+    }
+
+    func updateNSView(_ nsView: AVPlayerView, context: Context) {
+        if nsView.player !== player {
+            nsView.player = player
+        }
+    }
+}
+
 struct YouTubeEmbedPlayerView: NSViewRepresentable {
     var url: URL
 
     func makeNSView(context: Context) -> WKWebView {
         let configuration = WKWebViewConfiguration()
+        configuration.preferences.setValue(true, forKey: "allowFileAccessFromFileURLs")
+        configuration.defaultWebpagePreferences.allowsContentJavaScript = true
         let webView = WKWebView(frame: .zero, configuration: configuration)
         webView.setValue(false, forKey: "drawsBackground")
         webView.load(URLRequest(url: url))

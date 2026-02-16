@@ -1334,49 +1334,113 @@ struct TimelineView: View {
                         .buttonStyle(.bordered)
                     }
 
-                    Text("Note: YouTube watch links are not direct media files. Import local/downloaded media for timeline playback and editing.")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-
-                    GroupBox("Preview Monitor") {
-                        VStack(spacing: 10) {
-                            NativeVideoPlayerView(player: player)
-                                .frame(height: 340)
-                                .background(Color.black)
-                                .clipShape(RoundedRectangle(cornerRadius: 12))
-
-                            HStack(spacing: 8) {
-                                Button(isPlaying ? "Pause" : "Play") {
-                                    togglePlayback()
-                                }
-                                .buttonStyle(.borderedProminent)
-
-                                Button("Stop") {
-                                    stopPlayback()
-                                }
-                                .buttonStyle(.bordered)
-
-                                Button("Refresh Preview") {
-                                    reloadPreview()
-                                }
-                                .buttonStyle(.bordered)
-
-                                Spacer()
-                                Text("\(timeString(currentTime)) / \(timeString(playerDuration))")
+                    // Download progress indicator
+                    if store.isDownloading {
+                        VStack(alignment: .leading, spacing: 4) {
+                            HStack {
+                                ProgressView(value: store.downloadProgress)
+                                    .progressViewStyle(.linear)
+                                Text(String(format: "%.0f%%", store.downloadProgress * 100))
                                     .font(.caption.monospacedDigit())
                                     .foregroundStyle(.secondary)
                             }
+                            HStack {
+                                Image(systemName: "arrow.down.circle.fill")
+                                    .foregroundStyle(.green)
+                                Text("Downloading 4K/1080p in background")
+                                    .font(.caption)
+                                if !store.downloadSpeed.isEmpty {
+                                    Text("•")
+                                    Text(store.downloadSpeed)
+                                        .font(.caption)
+                                }
+                                if !store.downloadETA.isEmpty {
+                                    Text("• ETA \(store.downloadETA)")
+                                        .font(.caption)
+                                }
+                                Spacer()
+                            }
+                            .foregroundStyle(.secondary)
+                        }
+                        .padding(8)
+                        .background(Color.green.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
+                    }
 
-                            Slider(
-                                value: Binding(
-                                    get: { currentTime },
-                                    set: { newValue in
-                                        currentTime = newValue
-                                        seek(to: newValue)
+                    GroupBox("Preview Monitor") {
+                        VStack(spacing: 10) {
+                            // Show YouTube streaming OR local playback
+                            if store.isStreamingYouTube, let videoID = store.streamingVideoID {
+                                // STREAMING: Instant YouTube embed player
+                                VStack(spacing: 6) {
+                                    if let embedURL = URL(string: "https://www.youtube.com/embed/\(videoID)?autoplay=1&rel=0&modestbranding=1") {
+                                        YouTubeEmbedPlayerView(url: embedURL)
+                                            .frame(height: 340)
+                                            .clipShape(RoundedRectangle(cornerRadius: 12))
                                     }
-                                ),
-                                in: 0...max(playerDuration, 0.1)
-                            )
+                                    HStack {
+                                        Image(systemName: "play.tv.fill")
+                                            .foregroundStyle(.red)
+                                        Text("Streaming from YouTube")
+                                            .font(.caption.weight(.medium))
+                                        if store.isDownloading {
+                                            Text("• Local copy downloading...")
+                                                .font(.caption)
+                                                .foregroundStyle(.secondary)
+                                        }
+                                        Spacer()
+                                    }
+                                }
+                            } else {
+                                // LOCAL: Native AVPlayer for editing
+                                NativeVideoPlayerView(player: player)
+                                    .frame(height: 340)
+                                    .background(Color.black)
+                                    .clipShape(RoundedRectangle(cornerRadius: 12))
+
+                                HStack(spacing: 8) {
+                                    Button(isPlaying ? "Pause" : "Play") {
+                                        togglePlayback()
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    Button("Stop") {
+                                        stopPlayback()
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Button("Refresh Preview") {
+                                        reloadPreview()
+                                    }
+                                    .buttonStyle(.bordered)
+
+                                    Spacer()
+                                    
+                                    if store.localCopyReady {
+                                        HStack(spacing: 4) {
+                                            Image(systemName: "checkmark.circle.fill")
+                                                .foregroundStyle(.green)
+                                            Text("Local 4K/1080p")
+                                                .font(.caption)
+                                        }
+                                    }
+                                    
+                                    Text("\(timeString(currentTime)) / \(timeString(playerDuration))")
+                                        .font(.caption.monospacedDigit())
+                                        .foregroundStyle(.secondary)
+                                }
+
+                                Slider(
+                                    value: Binding(
+                                        get: { currentTime },
+                                        set: { newValue in
+                                            currentTime = newValue
+                                            seek(to: newValue)
+                                        }
+                                    ),
+                                    in: 0...max(playerDuration, 0.1)
+                                )
+                            }
                         }
                     }
 
@@ -1542,13 +1606,31 @@ struct TimelineView: View {
             .padding(22)
         }
         .onAppear {
-            reloadPreview(autoPlay: true)
+            if !store.isStreamingYouTube {
+                reloadPreview(autoPlay: true)
+            }
         }
         .onChange(of: store.activeProjectID) { _ in
-            reloadPreview(autoPlay: true)
+            if !store.isStreamingYouTube {
+                reloadPreview(autoPlay: true)
+            }
         }
         .onChange(of: store.activeProject?.timelineVideoClips.count) { _ in
-            reloadPreview()
+            if !store.isStreamingYouTube {
+                reloadPreview()
+            }
+        }
+        .onChange(of: store.localCopyReady) { ready in
+            if ready {
+                // Auto-reload when local copy becomes available
+                reloadPreview(autoPlay: true)
+            }
+        }
+        .onChange(of: store.isStreamingYouTube) { streaming in
+            if !streaming {
+                // Switch from streaming to local - reload preview
+                reloadPreview(autoPlay: true)
+            }
         }
         .onReceive(playbackTimer) { _ in
             syncPlaybackState()

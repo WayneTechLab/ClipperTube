@@ -22,6 +22,11 @@ final class StudioStore: ObservableObject {
     @Published var downloadETA: String = ""
     @Published var ytdlpAvailable: Bool = VideoDownloader.isYtdlpInstalled()
     @Published var selectedDownloadQuality: VideoQuality = .best
+    
+    // Streaming state - instant playback while downloading
+    @Published var isStreamingYouTube: Bool = false
+    @Published var streamingVideoID: String?
+    @Published var localCopyReady: Bool = false
 
     private let persistence = ProjectPersistence()
     private let fileManager = FileManager.default
@@ -163,75 +168,85 @@ final class StudioStore: ObservableObject {
     }
 
     /// Automated download + project creation + import pipeline
+    /// NOW: Instant streaming first, background 4K/1080p download
     func startAutomatedDownload(url: String, videoID: String) {
         guard !isDownloading else {
             lastError = "A download is already in progress."
             return
         }
         
+        // INSTANT: Start streaming immediately
+        streamingVideoID = videoID
+        isStreamingYouTube = true
+        localCopyReady = false
+        
+        // Create project immediately
+        let project = makeProject(
+            videoID: videoID,
+            sourceInput: url,
+            titlePrefix: "Cliper Project \(videoID)"
+        )
+        demoteCurrentProjects(excluding: project.id)
+        projects.insert(project, at: 0)
+        activeProjectID = project.id
+        persistWorkspace()
+        
+        // Navigate to timeline immediately for streaming playback
+        selectedSection = .timeline
+        statusMessage = "▶ Streaming from YouTube • Downloading 4K/1080p in background..."
+        
+        // Start background download
         isDownloading = true
         downloadProgress = 0
         downloadSpeed = ""
         downloadETA = ""
-        statusMessage = "Connecting to YouTube..."
+        
+        let projectID = project.id
         
         Task { @MainActor in
             do {
-                // Fetch metadata first for better UX
-                statusMessage = "Fetching video info..."
+                // Fetch metadata for better title
                 let metadata = try await VideoDownloader.fetchMetadata(url: url)
                 
-                // Create project immediately so user sees it
-                let project = makeProject(
-                    videoID: metadata.videoID,
-                    sourceInput: url,
-                    titlePrefix: metadata.title
-                )
-                demoteCurrentProjects(excluding: project.id)
-                projects.insert(project, at: 0)
-                activeProjectID = project.id
+                // Update project title
+                mutateProject(withID: projectID) { proj in
+                    proj.title = metadata.title
+                }
                 persistWorkspace()
                 
-                statusMessage = "Downloading: \(metadata.title)..."
+                statusMessage = "▶ Streaming • Downloading: \(metadata.title)..."
                 
-                // Download with progress tracking
+                // Download best quality (4K/1080p) in background
                 let result = try await VideoDownloader.download(
                     url: url,
-                    quality: selectedDownloadQuality
+                    quality: .best  // Always download best quality
                 ) { [weak self] progress in
                     Task { @MainActor in
                         self?.downloadProgress = progress.percent / 100.0
                         self?.downloadSpeed = progress.speed
                         self?.downloadETA = progress.eta
-                        self?.statusMessage = String(format: "Downloading %.0f%% - %@ - ETA %@", progress.percent, progress.speed, progress.eta)
+                        self?.statusMessage = String(format: "▶ Streaming • Download %.0f%% - %@ - ETA %@", progress.percent, progress.speed, progress.eta)
                     }
                 }
                 
                 // Import the downloaded video into the project
-                statusMessage = "Importing video into timeline..."
-                await importPrimaryVideo(into: project.id, filePath: result.videoPath)
+                statusMessage = "Download complete! Importing to timeline..."
+                await importPrimaryVideo(into: projectID, filePath: result.videoPath)
                 
-                // Navigate to timeline and mark ready
-                selectedSection = .timeline
+                // Switch from streaming to local playback
+                isStreamingYouTube = false
+                streamingVideoID = nil
+                localCopyReady = true
                 isDownloading = false
                 downloadProgress = 0
-                statusMessage = "Ready to edit: \(result.title)"
+                statusMessage = "✓ Local 4K/1080p ready: \(result.title)"
                 persistWorkspace()
                 
             } catch {
                 isDownloading = false
                 downloadProgress = 0
-                lastError = error.localizedDescription
-                
-                // Still create a project even if download failed
-                if YouTubeParser.extractID(from: url) != nil {
-                    let project = makeProject(videoID: videoID, sourceInput: url, titlePrefix: "Cliper Project \(videoID)")
-                    demoteCurrentProjects(excluding: project.id)
-                    projects.insert(project, at: 0)
-                    activeProjectID = project.id
-                    statusMessage = "Download failed. Project created - import video manually."
-                    persistWorkspace()
-                }
+                // Keep streaming even if download failed
+                statusMessage = "⚠ Download failed - streaming only. \(error.localizedDescription)"
             }
         }
     }

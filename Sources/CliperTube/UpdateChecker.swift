@@ -3,7 +3,7 @@ import Foundation
 /// Checks for app updates via GitHub Releases API
 enum UpdateChecker {
     
-    static let currentVersion = "1.3.0"
+    static let currentVersion = "1.4.0"
     static let repoOwner = "WayneTechLab"
     static let repoName = "ClipperTube"
     

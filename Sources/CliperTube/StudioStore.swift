@@ -27,6 +27,20 @@ final class StudioStore: ObservableObject {
     @Published var isStreamingYouTube: Bool = false
     @Published var streamingVideoID: String?
     @Published var localCopyReady: Bool = false
+    
+    // App Mode state - Easy Mode vs Pro Mode
+    @Published var appMode: AppMode = .easy
+    @Published var easyModeState: EasyModeState = EasyModeState()
+    @Published var easyModeURL: String = ""
+    
+    // CMS / File Management state
+    @Published var cmsFiles: [CMSFileItem] = []
+    @Published var cmsSelectedFileID: UUID?
+    @Published var cmsSortOption: CMSSortOption = .dateNewest
+    @Published var cmsViewMode: CMSViewMode = .grid
+    @Published var cmsFilterType: CMSFileType?
+    @Published var cmsSearchQuery: String = ""
+    @Published var cmsStats: CMSStats = CMSStats()
 
     private let persistence = ProjectPersistence()
     private let fileManager = FileManager.default
@@ -39,6 +53,7 @@ final class StudioStore: ObservableObject {
 
     init() {
         loadWorkspace()
+        scanCMSFiles()
     }
 
     var activeProject: StudioProject? {
@@ -1662,5 +1677,281 @@ final class StudioStore: ObservableObject {
         }
 
         return "mp4"
+    }
+    
+    // MARK: - Easy Mode Pipeline
+    
+    /// Full automated pipeline: Download → Analyze → Clip → Caption → Stitch → Export
+    func runEasyModePipeline(url: String) {
+        guard !url.isEmpty else {
+            easyModeState.error = "Please paste a YouTube URL"
+            return
+        }
+        
+        guard let videoID = YouTubeParser.extractID(from: url) else {
+            easyModeState.error = "Invalid YouTube URL"
+            return
+        }
+        
+        easyModeState = EasyModeState()
+        easyModeState.currentStep = .downloading
+        easyModeState.statusText = "Starting automated pipeline..."
+        
+        Task { @MainActor in
+            do {
+                // Step 1: Download
+                easyModeState.currentStep = .downloading
+                easyModeState.statusText = "Downloading video from YouTube..."
+                easyModeState.progress = 0.1
+                
+                let metadata = try await VideoDownloader.fetchMetadata(url: url)
+                easyModeState.statusText = "Downloading: \(metadata.title)"
+                
+                let result = try await VideoDownloader.download(url: url, quality: .best) { [weak self] progress in
+                    Task { @MainActor in
+                        self?.easyModeState.progress = 0.1 + (progress.percent / 100.0) * 0.3
+                        self?.easyModeState.statusText = String(format: "Downloading %.0f%% - %@", progress.percent, progress.speed)
+                    }
+                }
+                
+                // Step 2: Create Project & Import
+                easyModeState.currentStep = .analyzing
+                easyModeState.progress = 0.4
+                easyModeState.statusText = "Creating project and importing video..."
+                
+                let project = makeProject(videoID: videoID, sourceInput: url, titlePrefix: metadata.title)
+                demoteCurrentProjects(excluding: project.id)
+                projects.insert(project, at: 0)
+                activeProjectID = project.id
+                persistWorkspace()
+                
+                await importPrimaryVideo(into: project.id, filePath: result.videoPath)
+                
+                // Step 3: Generate clips
+                easyModeState.currentStep = .clipping
+                easyModeState.progress = 0.5
+                easyModeState.statusText = "Analyzing content and generating clips..."
+                
+                runAutoClipAndStitch(maxClips: 6)
+                
+                // Step 4: Generate captions
+                easyModeState.currentStep = .captioning
+                easyModeState.progress = 0.6
+                easyModeState.statusText = "Generating captions..."
+                
+                regenerateCaptions()
+                
+                // Step 5: Stitch timeline
+                easyModeState.currentStep = .stitching
+                easyModeState.progress = 0.7
+                easyModeState.statusText = "Building timeline..."
+                
+                // Timeline is already built by runAutoClipAndStitch
+                try await Task.sleep(nanoseconds: 500_000_000) // Brief pause for UI
+                
+                // Step 6: Export
+                easyModeState.currentStep = .exporting
+                easyModeState.progress = 0.8
+                easyModeState.statusText = "Rendering final video..."
+                
+                await performExportCurrentProject()
+                
+                // Complete
+                easyModeState.currentStep = .complete
+                easyModeState.progress = 1.0
+                easyModeState.statusText = "✓ Your video is ready!"
+                
+                if let latestExport = activeProject?.exports.sorted(by: { $0.date > $1.date }).first {
+                    easyModeState.outputPath = latestExport.outputPath
+                }
+                
+                scanCMSFiles()
+                
+            } catch {
+                easyModeState.currentStep = .failed
+                easyModeState.error = error.localizedDescription
+                easyModeState.statusText = "Pipeline failed: \(error.localizedDescription)"
+            }
+        }
+    }
+    
+    func resetEasyMode() {
+        easyModeState = EasyModeState()
+        easyModeURL = ""
+    }
+    
+    // MARK: - CMS / File Management
+    
+    func scanCMSFiles() {
+        var files: [CMSFileItem] = []
+        var stats = CMSStats()
+        
+        // Scan CliperTube directories
+        let directories = [
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Movies/CliperTubeImports"),
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Movies/CliperTubeExports"),
+            fileManager.homeDirectoryForCurrentUser.appendingPathComponent("Documents/CliperTube")
+        ]
+        
+        for directory in directories {
+            guard fileManager.fileExists(atPath: directory.path) else { continue }
+            
+            if let enumerator = fileManager.enumerator(at: directory, includingPropertiesForKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey], options: [.skipsHiddenFiles]) {
+                while let fileURL = enumerator.nextObject() as? URL {
+                    guard !fileURL.hasDirectoryPath else { continue }
+                    
+                    do {
+                        let resourceValues = try fileURL.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
+                        let size = Int64(resourceValues.fileSize ?? 0)
+                        let created = resourceValues.creationDate ?? Date()
+                        let modified = resourceValues.contentModificationDate ?? Date()
+                        
+                        let ext = fileURL.pathExtension.lowercased()
+                        let fileType = classifyFileType(extension: ext)
+                        
+                        // Find associated project (simplified to avoid type-check timeout)
+                        let filePath = fileURL.path
+                        let associatedProject = findProjectForFile(path: filePath)
+                        
+                        let item = CMSFileItem(
+                            name: fileURL.lastPathComponent,
+                            path: filePath,
+                            fileType: fileType,
+                            size: size,
+                            createdAt: created,
+                            modifiedAt: modified,
+                            projectID: associatedProject?.id,
+                            projectTitle: associatedProject?.title
+                        )
+                        
+                        files.append(item)
+                        stats.totalFiles += 1
+                        stats.totalSize += size
+                        
+                        switch fileType {
+                        case .video: stats.videoCount += 1
+                        case .audio: stats.audioCount += 1
+                        case .export: stats.exportCount += 1
+                        default: break
+                        }
+                        
+                    } catch {
+                        continue
+                    }
+                }
+            }
+        }
+        
+        // Also add exports from projects
+        for project in projects {
+            for export in project.exports {
+                let url = URL(fileURLWithPath: export.outputPath)
+                if !files.contains(where: { $0.path == export.outputPath }) && fileManager.fileExists(atPath: export.outputPath) {
+                    do {
+                        let resourceValues = try url.resourceValues(forKeys: [.fileSizeKey, .creationDateKey, .contentModificationDateKey])
+                        let item = CMSFileItem(
+                            name: url.lastPathComponent,
+                            path: export.outputPath,
+                            fileType: .export,
+                            size: Int64(resourceValues.fileSize ?? 0),
+                            createdAt: resourceValues.creationDate ?? export.date,
+                            modifiedAt: resourceValues.contentModificationDate ?? export.date,
+                            projectID: project.id,
+                            projectTitle: project.title
+                        )
+                        files.append(item)
+                        stats.totalFiles += 1
+                        stats.totalSize += Int64(resourceValues.fileSize ?? 0)
+                        stats.exportCount += 1
+                    } catch {
+                        continue
+                    }
+                }
+            }
+        }
+        
+        cmsFiles = files
+        cmsStats = stats
+        sortCMSFiles()
+    }
+    
+    func sortCMSFiles() {
+        switch cmsSortOption {
+        case .nameAsc:
+            cmsFiles.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        case .nameDesc:
+            cmsFiles.sort { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedDescending }
+        case .dateNewest:
+            cmsFiles.sort { $0.modifiedAt > $1.modifiedAt }
+        case .dateOldest:
+            cmsFiles.sort { $0.modifiedAt < $1.modifiedAt }
+        case .sizeDesc:
+            cmsFiles.sort { $0.size > $1.size }
+        case .sizeAsc:
+            cmsFiles.sort { $0.size < $1.size }
+        }
+    }
+    
+    var filteredCMSFiles: [CMSFileItem] {
+        var result = cmsFiles
+        
+        if let filterType = cmsFilterType {
+            result = result.filter { $0.fileType == filterType }
+        }
+        
+        if !cmsSearchQuery.isEmpty {
+            result = result.filter {
+                $0.name.localizedCaseInsensitiveContains(cmsSearchQuery) ||
+                $0.projectTitle?.localizedCaseInsensitiveContains(cmsSearchQuery) == true
+            }
+        }
+        
+        return result
+    }
+    
+    func deleteCMSFile(_ item: CMSFileItem) {
+        do {
+            try fileManager.removeItem(atPath: item.path)
+            cmsFiles.removeAll { $0.id == item.id }
+            scanCMSFiles() // Refresh stats
+            statusMessage = "Deleted: \(item.name)"
+        } catch {
+            lastError = "Failed to delete: \(error.localizedDescription)"
+        }
+    }
+    
+    func revealCMSFile(_ item: CMSFileItem) {
+        let url = URL(fileURLWithPath: item.path)
+        NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+    
+    func openCMSFile(_ item: CMSFileItem) {
+        let url = URL(fileURLWithPath: item.path)
+        NSWorkspace.shared.open(url)
+    }
+    
+    private func findProjectForFile(path: String) -> StudioProject? {
+        for project in projects {
+            for source in project.mediaSources {
+                if source.filePath == path {
+                    return project
+                }
+            }
+            for export in project.exports {
+                if export.outputPath == path {
+                    return project
+                }
+            }
+        }
+        return nil
+    }
+    
+    private func classifyFileType(extension ext: String) -> CMSFileType {
+        for type in CMSFileType.allCases {
+            if type.extensions.contains(ext) {
+                return type
+            }
+        }
+        return .other
     }
 }

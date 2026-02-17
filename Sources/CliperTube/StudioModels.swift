@@ -287,6 +287,7 @@ struct BenchmarkFeature: Identifiable, Codable {
 enum StudioSection: String, CaseIterable, Identifiable {
     case dashboard
     case projects
+    case fileManager
     case youtube
     case clipIntelligence
     case captions
@@ -305,6 +306,7 @@ enum StudioSection: String, CaseIterable, Identifiable {
         switch self {
         case .dashboard: return "Dashboard"
         case .projects: return "Projects + Outputs"
+        case .fileManager: return "File Manager"
         case .youtube: return "YouTube Hub"
         case .clipIntelligence: return "Clip Intelligence"
         case .captions: return "Captions"
@@ -440,4 +442,159 @@ struct StudioMetrics {
     var averageConfidence: Double
     var captionCount: Int
     var transactionTotal: Double
+}
+
+// MARK: - App Mode
+
+enum AppMode: String, CaseIterable, Identifiable {
+    case easy = "Easy Mode"
+    case pro = "Pro Mode"
+    
+    var id: String { rawValue }
+    
+    var icon: String {
+        switch self {
+        case .easy: return "wand.and.stars"
+        case .pro: return "slider.horizontal.3"
+        }
+    }
+    
+    var description: String {
+        switch self {
+        case .easy: return "One-click automated workflow"
+        case .pro: return "Full control over every step"
+        }
+    }
+}
+
+// MARK: - Easy Mode Pipeline State
+
+enum EasyModePipelineStep: String, CaseIterable, Identifiable {
+    case idle = "Ready"
+    case downloading = "Downloading Video"
+    case analyzing = "Analyzing Content"
+    case clipping = "Creating Clips"
+    case captioning = "Generating Captions"
+    case stitching = "Stitching Timeline"
+    case exporting = "Exporting Final"
+    case complete = "Complete"
+    case failed = "Failed"
+    
+    var id: String { rawValue }
+    
+    var icon: String {
+        switch self {
+        case .idle: return "play.circle"
+        case .downloading: return "arrow.down.circle"
+        case .analyzing: return "brain.head.profile"
+        case .clipping: return "scissors"
+        case .captioning: return "captions.bubble"
+        case .stitching: return "timeline.selection"
+        case .exporting: return "square.and.arrow.up"
+        case .complete: return "checkmark.circle.fill"
+        case .failed: return "xmark.circle.fill"
+        }
+    }
+    
+    var isTerminal: Bool {
+        self == .complete || self == .failed
+    }
+}
+
+struct EasyModeState {
+    var currentStep: EasyModePipelineStep = .idle
+    var progress: Double = 0
+    var statusText: String = "Paste a YouTube URL to get started"
+    var outputPath: String?
+    var error: String?
+}
+
+// MARK: - CMS / File Management
+
+struct CMSFileItem: Identifiable {
+    var id: UUID = UUID()
+    var name: String
+    var path: String
+    var fileType: CMSFileType
+    var size: Int64
+    var createdAt: Date
+    var modifiedAt: Date
+    var projectID: UUID?
+    var projectTitle: String?
+    var thumbnailPath: String?
+}
+
+enum CMSFileType: String, CaseIterable, Identifiable {
+    case video = "Video"
+    case audio = "Audio"
+    case image = "Image"
+    case caption = "Caption"
+    case project = "Project"
+    case export = "Export"
+    case other = "Other"
+    
+    var id: String { rawValue }
+    
+    var icon: String {
+        switch self {
+        case .video: return "film"
+        case .audio: return "waveform"
+        case .image: return "photo"
+        case .caption: return "captions.bubble"
+        case .project: return "folder"
+        case .export: return "square.and.arrow.up"
+        case .other: return "doc"
+        }
+    }
+    
+    var extensions: [String] {
+        switch self {
+        case .video: return ["mp4", "mov", "m4v", "mkv", "webm"]
+        case .audio: return ["mp3", "m4a", "wav", "aac", "flac"]
+        case .image: return ["jpg", "jpeg", "png", "heic", "gif", "webp"]
+        case .caption: return ["srt", "vtt", "ass", "json"]
+        case .project: return ["clipertube"]
+        case .export: return []
+        case .other: return []
+        }
+    }
+}
+
+enum CMSSortOption: String, CaseIterable, Identifiable {
+    case nameAsc = "Name (A-Z)"
+    case nameDesc = "Name (Z-A)"
+    case dateNewest = "Newest First"
+    case dateOldest = "Oldest First"
+    case sizeDesc = "Largest First"
+    case sizeAsc = "Smallest First"
+    
+    var id: String { rawValue }
+}
+
+enum CMSViewMode: String, CaseIterable, Identifiable {
+    case grid = "Grid"
+    case list = "List"
+    case gallery = "Gallery"
+    
+    var id: String { rawValue }
+    
+    var icon: String {
+        switch self {
+        case .grid: return "square.grid.2x2"
+        case .list: return "list.bullet"
+        case .gallery: return "rectangle.grid.1x2"
+        }
+    }
+}
+
+struct CMSStats {
+    var totalFiles: Int = 0
+    var totalSize: Int64 = 0
+    var videoCount: Int = 0
+    var audioCount: Int = 0
+    var exportCount: Int = 0
+    
+    var formattedSize: String {
+        ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
+    }
 }

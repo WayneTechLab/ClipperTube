@@ -43,24 +43,70 @@ struct StudioRootView: View {
             Text("v1.3.0")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
-                .padding(.bottom, 12)
-
-            ForEach(StudioSection.allCases) { section in
-                Button {
-                    store.selectedSection = section
-                } label: {
-                    HStack {
-                        Image(systemName: icon(for: section))
-                            .frame(width: 18)
-                        Text(section.title)
-                            .font(.system(size: 13, weight: .medium))
-                        Spacer()
+                .padding(.bottom, 8)
+            
+            // Mode Switcher
+            HStack(spacing: 4) {
+                ForEach(AppMode.allCases) { mode in
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            store.appMode = mode
+                        }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: mode.icon)
+                                .font(.caption)
+                            Text(mode == .easy ? "Easy" : "Pro")
+                                .font(.caption.weight(.medium))
+                        }
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 6)
+                        .background(store.appMode == mode ? Color.accentColor : Color.secondary.opacity(0.15))
+                        .foregroundStyle(store.appMode == mode ? .white : .primary)
+                        .clipShape(RoundedRectangle(cornerRadius: 8))
                     }
-                    .padding(10)
-                    .background(store.selectedSection == section ? Color.accentColor.opacity(0.16) : Color.clear)
-                    .clipShape(RoundedRectangle(cornerRadius: 10))
+                    .buttonStyle(.plain)
                 }
-                .buttonStyle(.plain)
+            }
+            .padding(.bottom, 12)
+            
+            if store.appMode == .pro {
+                ForEach(StudioSection.allCases) { section in
+                    Button {
+                        store.selectedSection = section
+                    } label: {
+                        HStack {
+                            Image(systemName: icon(for: section))
+                                .frame(width: 18)
+                            Text(section.title)
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(store.selectedSection == section ? Color.accentColor.opacity(0.16) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
+            } else {
+                // Easy Mode simplified nav
+                ForEach(easyModeSections, id: \.self) { section in
+                    Button {
+                        store.selectedSection = section
+                    } label: {
+                        HStack {
+                            Image(systemName: icon(for: section))
+                                .frame(width: 18)
+                            Text(section.title)
+                                .font(.system(size: 13, weight: .medium))
+                            Spacer()
+                        }
+                        .padding(10)
+                        .background(store.selectedSection == section ? Color.accentColor.opacity(0.16) : Color.clear)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                    }
+                    .buttonStyle(.plain)
+                }
             }
 
             Spacer(minLength: 0)
@@ -80,36 +126,46 @@ struct StudioRootView: View {
         .padding(16)
         .frame(width: 260)
     }
+    
+    private var easyModeSections: [StudioSection] {
+        [.dashboard, .projects, .fileManager, .timeline]
+    }
 
     @ViewBuilder
     private var detail: some View {
-        switch store.selectedSection {
-        case .dashboard:
-            DashboardView()
-        case .projects:
-            ProjectsView()
-        case .youtube:
-            YouTubeHubView()
-        case .clipIntelligence:
-            ClipIntelligenceView()
-        case .captions:
-            CaptionsView()
-        case .timeline:
-            TimelineView()
-        case .voiceOver:
-            VoiceOverView()
-        case .audioStudio:
-            AudioStudioView()
-        case .proEditor:
-            ProEditorView()
-        case .distribution:
-            DistributionCenterView()
-        case .transactions:
-            TransactionsView()
-        case .revenueClients:
-            RevenueClientsView()
-        case .benchmarks:
-            BenchmarksView()
+        if store.appMode == .easy && store.selectedSection == .dashboard {
+            EasyModeView()
+        } else {
+            switch store.selectedSection {
+            case .dashboard:
+                DashboardView()
+            case .projects:
+                ProjectsView()
+            case .fileManager:
+                CMSView()
+            case .youtube:
+                YouTubeHubView()
+            case .clipIntelligence:
+                ClipIntelligenceView()
+            case .captions:
+                CaptionsView()
+            case .timeline:
+                TimelineView()
+            case .voiceOver:
+                VoiceOverView()
+            case .audioStudio:
+                AudioStudioView()
+            case .proEditor:
+                ProEditorView()
+            case .distribution:
+                DistributionCenterView()
+            case .transactions:
+                TransactionsView()
+            case .revenueClients:
+                RevenueClientsView()
+            case .benchmarks:
+                BenchmarksView()
+            }
         }
     }
 
@@ -128,6 +184,7 @@ struct StudioRootView: View {
         switch section {
         case .dashboard: return "rectangle.3.group.bubble.left"
         case .projects: return "shippingbox"
+        case .fileManager: return "folder.fill"
         case .youtube: return "play.tv"
         case .clipIntelligence: return "brain.head.profile"
         case .captions: return "captions.bubble"
@@ -369,6 +426,569 @@ struct DashboardView: View {
         case .current: return .blue
         case .working: return .orange
         case .past: return .gray
+        }
+    }
+}
+
+// MARK: - Easy Mode View
+
+struct EasyModeView: View {
+    @EnvironmentObject private var store: StudioStore
+    @State private var isAnimating = false
+    
+    var body: some View {
+        ScrollView {
+            VStack(spacing: 32) {
+                // Header
+                VStack(spacing: 8) {
+                    Image(systemName: "wand.and.stars")
+                        .font(.system(size: 48))
+                        .foregroundStyle(.blue)
+                        .opacity(store.easyModeState.currentStep != .idle && !store.easyModeState.currentStep.isTerminal ? (isAnimating ? 0.6 : 1.0) : 1.0)
+                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isAnimating)
+                    
+                    Text("Easy Mode")
+                        .font(.largeTitle.weight(.bold))
+                    
+                    Text("One-click video creation from YouTube")
+                        .font(.title3)
+                        .foregroundStyle(.secondary)
+                }
+                .padding(.top, 40)
+                
+                // URL Input
+                if store.easyModeState.currentStep == .idle || store.easyModeState.currentStep.isTerminal {
+                    VStack(spacing: 16) {
+                        HStack {
+                            Image(systemName: "link")
+                                .foregroundStyle(.secondary)
+                            TextField("Paste YouTube URL here...", text: $store.easyModeURL)
+                                .textFieldStyle(.plain)
+                                .font(.title3)
+                        }
+                        .padding(16)
+                        .background(Color.secondary.opacity(0.1))
+                        .clipShape(RoundedRectangle(cornerRadius: 12))
+                        .frame(maxWidth: 600)
+                        
+                        Button {
+                            store.runEasyModePipeline(url: store.easyModeURL)
+                        } label: {
+                            HStack(spacing: 8) {
+                                Image(systemName: "sparkles")
+                                Text("Create Video Automatically")
+                                    .font(.headline)
+                            }
+                            .padding(.horizontal, 32)
+                            .padding(.vertical, 16)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.large)
+                        .disabled(store.easyModeURL.isEmpty)
+                    }
+                }
+                
+                // Pipeline Progress
+                if store.easyModeState.currentStep != .idle {
+                    VStack(spacing: 24) {
+                        // Progress Steps
+                        HStack(spacing: 0) {
+                            ForEach(Array(EasyModePipelineStep.allCases.dropFirst().dropLast(2).enumerated()), id: \.element) { index, step in
+                                VStack(spacing: 8) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(stepColor(for: step))
+                                            .frame(width: 40, height: 40)
+                                        
+                                        if store.easyModeState.currentStep == step {
+                                            Circle()
+                                                .stroke(Color.accentColor, lineWidth: 3)
+                                                .frame(width: 48, height: 48)
+                                                .scaleEffect(isAnimating ? 1.1 : 1.0)
+                                                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isAnimating)
+                                        }
+                                        
+                                        Image(systemName: step.icon)
+                                            .font(.system(size: 16, weight: .medium))
+                                            .foregroundStyle(stepIconColor(for: step))
+                                    }
+                                    
+                                    Text(step.rawValue)
+                                        .font(.caption)
+                                        .foregroundStyle(isStepActive(step) ? .primary : .secondary)
+                                }
+                                .frame(maxWidth: .infinity)
+                                
+                                if index < EasyModePipelineStep.allCases.dropFirst().dropLast(2).count - 1 {
+                                    Rectangle()
+                                        .fill(stepConnectorColor(after: step))
+                                        .frame(height: 2)
+                                        .frame(maxWidth: 40)
+                                }
+                            }
+                        }
+                        .padding(.horizontal, 40)
+                        
+                        // Progress Bar
+                        VStack(spacing: 8) {
+                            ProgressView(value: store.easyModeState.progress)
+                                .progressViewStyle(.linear)
+                                .scaleEffect(y: 2)
+                            
+                            Text(store.easyModeState.statusText)
+                                .font(.subheadline)
+                                .foregroundStyle(.secondary)
+                        }
+                        .frame(maxWidth: 500)
+                    }
+                    .padding(.vertical, 24)
+                    .onAppear { isAnimating = true }
+                }
+                
+                // Error Display
+                if let error = store.easyModeState.error {
+                    HStack {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.red)
+                        Text(error)
+                            .foregroundStyle(.red)
+                    }
+                    .padding()
+                    .background(Color.red.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                }
+                
+                // Complete State
+                if store.easyModeState.currentStep == .complete {
+                    VStack(spacing: 16) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 64))
+                            .foregroundStyle(.green)
+                        
+                        Text("Your video is ready!")
+                            .font(.title2.weight(.semibold))
+                        
+                        HStack(spacing: 12) {
+                            if let outputPath = store.easyModeState.outputPath {
+                                Button {
+                                    store.revealOutput(path: outputPath)
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "folder")
+                                        Text("Show in Finder")
+                                    }
+                                }
+                                .buttonStyle(.bordered)
+                                
+                                Button {
+                                    NSWorkspace.shared.open(URL(fileURLWithPath: outputPath))
+                                } label: {
+                                    HStack {
+                                        Image(systemName: "play.fill")
+                                        Text("Play Video")
+                                    }
+                                }
+                                .buttonStyle(.borderedProminent)
+                            }
+                            
+                            Button {
+                                store.resetEasyMode()
+                            } label: {
+                                HStack {
+                                    Image(systemName: "plus")
+                                    Text("Create Another")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                        }
+                    }
+                    .padding(.vertical, 24)
+                }
+                
+                // Recent Outputs Preview
+                if store.easyModeState.currentStep == .idle {
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Recent Creations")
+                            .font(.headline)
+                        
+                        if store.outputHistory.isEmpty {
+                            Text("No videos created yet. Paste a YouTube URL above to get started!")
+                                .foregroundStyle(.secondary)
+                                .padding()
+                        } else {
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 16) {
+                                ForEach(store.outputHistory.prefix(6)) { item in
+                                    VStack(alignment: .leading, spacing: 8) {
+                                        RoundedRectangle(cornerRadius: 8)
+                                            .fill(Color.secondary.opacity(0.2))
+                                            .frame(height: 120)
+                                            .overlay {
+                                                Image(systemName: "film")
+                                                    .font(.largeTitle)
+                                                    .foregroundStyle(.secondary)
+                                            }
+                                        
+                                        Text(item.projectTitle)
+                                            .font(.caption.weight(.medium))
+                                            .lineLimit(1)
+                                        
+                                        Text(item.export.date, style: .relative)
+                                            .font(.caption2)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    .onTapGesture {
+                                        store.revealOutput(path: item.export.outputPath)
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 40)
+                }
+                
+                Spacer(minLength: 40)
+                
+                // Switch to Pro Mode hint
+                if store.easyModeState.currentStep == .idle {
+                    HStack {
+                        Text("Need more control?")
+                            .foregroundStyle(.secondary)
+                        Button("Switch to Pro Mode") {
+                            store.appMode = .pro
+                        }
+                        .buttonStyle(.link)
+                    }
+                    .font(.caption)
+                    .padding(.bottom, 20)
+                }
+            }
+            .frame(maxWidth: .infinity)
+        }
+    }
+    
+    private func stepColor(for step: EasyModePipelineStep) -> Color {
+        if isStepComplete(step) { return .green }
+        if store.easyModeState.currentStep == step { return .accentColor }
+        return .secondary.opacity(0.3)
+    }
+    
+    private func stepIconColor(for step: EasyModePipelineStep) -> Color {
+        if isStepComplete(step) || store.easyModeState.currentStep == step { return .white }
+        return .secondary
+    }
+    
+    private func stepConnectorColor(after step: EasyModePipelineStep) -> Color {
+        isStepComplete(step) ? .green : .secondary.opacity(0.3)
+    }
+    
+    private func isStepComplete(_ step: EasyModePipelineStep) -> Bool {
+        guard let currentIndex = EasyModePipelineStep.allCases.firstIndex(of: store.easyModeState.currentStep),
+              let stepIndex = EasyModePipelineStep.allCases.firstIndex(of: step) else { return false }
+        return stepIndex < currentIndex
+    }
+    
+    private func isStepActive(_ step: EasyModePipelineStep) -> Bool {
+        isStepComplete(step) || store.easyModeState.currentStep == step
+    }
+}
+
+// MARK: - CMS / File Manager View
+
+struct CMSView: View {
+    @EnvironmentObject private var store: StudioStore
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            // Toolbar
+            HStack(spacing: 16) {
+                Text("File Manager")
+                    .font(.title2.weight(.bold))
+                
+                Spacer()
+                
+                // Search
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("Search files...", text: $store.cmsSearchQuery)
+                        .textFieldStyle(.plain)
+                }
+                .padding(8)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .frame(maxWidth: 200)
+                
+                // Filter
+                Picker("Type", selection: $store.cmsFilterType) {
+                    Text("All Files").tag(CMSFileType?.none)
+                    ForEach(CMSFileType.allCases) { type in
+                        Label(type.rawValue, systemImage: type.icon).tag(CMSFileType?.some(type))
+                    }
+                }
+                .frame(width: 120)
+                
+                // Sort
+                Picker("Sort", selection: $store.cmsSortOption) {
+                    ForEach(CMSSortOption.allCases) { option in
+                        Text(option.rawValue).tag(option)
+                    }
+                }
+                .frame(width: 140)
+                .onChange(of: store.cmsSortOption) { _ in
+                    store.sortCMSFiles()
+                }
+                
+                // View Mode
+                Picker("View", selection: $store.cmsViewMode) {
+                    ForEach(CMSViewMode.allCases) { mode in
+                        Image(systemName: mode.icon).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .frame(width: 100)
+                
+                Button {
+                    store.scanCMSFiles()
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                }
+                .buttonStyle(.bordered)
+            }
+            .padding()
+            
+            Divider()
+            
+            // Stats Bar
+            HStack(spacing: 24) {
+                StatBadge(icon: "doc.fill", label: "Files", value: "\(store.cmsStats.totalFiles)")
+                StatBadge(icon: "film", label: "Videos", value: "\(store.cmsStats.videoCount)")
+                StatBadge(icon: "square.and.arrow.up", label: "Exports", value: "\(store.cmsStats.exportCount)")
+                StatBadge(icon: "internaldrive", label: "Storage", value: store.cmsStats.formattedSize)
+                Spacer()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+            .background(Color.secondary.opacity(0.05))
+            
+            // File Grid/List
+            ScrollView {
+                if store.filteredCMSFiles.isEmpty {
+                    VStack(spacing: 16) {
+                        Image(systemName: "folder.badge.questionmark")
+                            .font(.system(size: 48))
+                            .foregroundStyle(.secondary)
+                        Text("No files found")
+                            .font(.title3)
+                            .foregroundStyle(.secondary)
+                        Text("Create a video in Easy Mode or import media to get started")
+                            .font(.caption)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .padding(.top, 100)
+                } else {
+                    switch store.cmsViewMode {
+                    case .grid:
+                        cmsGridView
+                    case .list:
+                        cmsListView
+                    case .gallery:
+                        cmsGalleryView
+                    }
+                }
+            }
+        }
+    }
+    
+    private var cmsGridView: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 16) {
+            ForEach(store.filteredCMSFiles) { file in
+                CMSFileCard(file: file)
+            }
+        }
+        .padding()
+    }
+    
+    private var cmsListView: some View {
+        LazyVStack(spacing: 1) {
+            ForEach(store.filteredCMSFiles) { file in
+                CMSFileRow(file: file)
+            }
+        }
+        .padding(.horizontal)
+    }
+    
+    private var cmsGalleryView: some View {
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 280))], spacing: 20) {
+            ForEach(store.filteredCMSFiles.filter { $0.fileType == .video || $0.fileType == .export }) { file in
+                CMSVideoCard(file: file)
+            }
+        }
+        .padding()
+    }
+}
+
+struct StatBadge: View {
+    var icon: String
+    var label: String
+    var value: String
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: icon)
+                .foregroundStyle(.secondary)
+            Text(label)
+                .foregroundStyle(.secondary)
+            Text(value)
+                .fontWeight(.medium)
+        }
+        .font(.caption)
+    }
+}
+
+struct CMSFileCard: View {
+    @EnvironmentObject private var store: StudioStore
+    var file: CMSFileItem
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Thumbnail/Icon
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.secondary.opacity(0.15))
+                .frame(height: 100)
+                .overlay {
+                    Image(systemName: file.fileType.icon)
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                }
+            
+            // Info
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.name)
+                    .font(.caption.weight(.medium))
+                    .lineLimit(1)
+                
+                HStack {
+                    Text(file.fileType.rawValue)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+                
+                if let projectTitle = file.projectTitle {
+                    Text(projectTitle)
+                        .font(.caption2)
+                        .foregroundStyle(.blue)
+                        .lineLimit(1)
+                }
+            }
+        }
+        .padding(8)
+        .background(Color.secondary.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .contextMenu {
+            Button { store.openCMSFile(file) } label: { Label("Open", systemImage: "play") }
+            Button { store.revealCMSFile(file) } label: { Label("Show in Finder", systemImage: "folder") }
+            Divider()
+            Button(role: .destructive) { store.deleteCMSFile(file) } label: { Label("Delete", systemImage: "trash") }
+        }
+    }
+}
+
+struct CMSFileRow: View {
+    @EnvironmentObject private var store: StudioStore
+    var file: CMSFileItem
+    
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: file.fileType.icon)
+                .font(.title2)
+                .foregroundStyle(.secondary)
+                .frame(width: 32)
+            
+            VStack(alignment: .leading, spacing: 2) {
+                Text(file.name)
+                    .font(.subheadline.weight(.medium))
+                if let projectTitle = file.projectTitle {
+                    Text(projectTitle)
+                        .font(.caption)
+                        .foregroundStyle(.blue)
+                }
+            }
+            
+            Spacer()
+            
+            Text(file.fileType.rawValue)
+                .font(.caption)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(Capsule())
+            
+            Text(ByteCountFormatter.string(fromByteCount: file.size, countStyle: .file))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 70, alignment: .trailing)
+            
+            Text(file.modifiedAt, style: .date)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 100, alignment: .trailing)
+            
+            Button { store.revealCMSFile(file) } label: { Image(systemName: "folder") }
+                .buttonStyle(.borderless)
+            Button { store.openCMSFile(file) } label: { Image(systemName: "play") }
+                .buttonStyle(.borderless)
+        }
+        .padding(.vertical, 8)
+        .padding(.horizontal, 12)
+        .background(Color.secondary.opacity(0.03))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+struct CMSVideoCard: View {
+    @EnvironmentObject private var store: StudioStore
+    var file: CMSFileItem
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            // Video Preview Placeholder
+            ZStack {
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(Color.black)
+                    .aspectRatio(16/9, contentMode: .fit)
+                
+                Image(systemName: "play.circle.fill")
+                    .font(.system(size: 48))
+                    .foregroundStyle(.white.opacity(0.8))
+            }
+            .onTapGesture {
+                store.openCMSFile(file)
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text(file.name)
+                    .font(.subheadline.weight(.medium))
+                    .lineLimit(2)
+                
+                HStack {
+                    if let projectTitle = file.projectTitle {
+                        Text(projectTitle)
+                            .font(.caption)
+                            .foregroundStyle(.blue)
+                    }
+                    Spacer()
+                    Text(file.modifiedAt, style: .relative)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.horizontal, 4)
         }
     }
 }

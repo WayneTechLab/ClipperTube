@@ -1375,7 +1375,8 @@ struct TimelineView: View {
                                 VStack(spacing: 6) {
                                     if let embedURL = URL(string: "https://www.youtube.com/embed/\(videoID)?autoplay=1&rel=0&modestbranding=1") {
                                         YouTubeEmbedPlayerView(url: embedURL)
-                                            .frame(height: 340)
+                                            .aspectRatio(16/9, contentMode: .fit)
+                                            .frame(minHeight: 400, maxHeight: 600)
                                             .clipShape(RoundedRectangle(cornerRadius: 12))
                                     }
                                     HStack {
@@ -1394,7 +1395,8 @@ struct TimelineView: View {
                             } else {
                                 // LOCAL: Native AVPlayer for editing
                                 NativeVideoPlayerView(player: player)
-                                    .frame(height: 340)
+                                    .aspectRatio(16/9, contentMode: .fit)
+                                    .frame(minHeight: 400, maxHeight: 600)
                                     .background(Color.black)
                                     .clipShape(RoundedRectangle(cornerRadius: 12))
 
@@ -2369,6 +2371,7 @@ struct NativeVideoPlayerView: NSViewRepresentable {
         view.player = player
         view.controlsStyle = .floating
         view.showsFullScreenToggleButton = true
+        view.videoGravity = .resizeAspect
         return view
     }
 

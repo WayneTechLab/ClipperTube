@@ -1681,8 +1681,10 @@ final class StudioStore: ObservableObject {
     
     // MARK: - Easy Mode Pipeline
     
-    /// Full automated pipeline: Download → Analyze → Clip → Caption → Stitch → Export
+    /// Full automated pipeline: Download → Analyze → Clip → Caption → Voice Over → Stitch → Export
     func runEasyModePipeline(url: String) {
+        let config = easyModeState.config
+        
         guard !url.isEmpty else {
             easyModeState.error = "Please paste a YouTube URL"
             return
@@ -1693,7 +1695,11 @@ final class StudioStore: ObservableObject {
             return
         }
         
+        // Reset state but keep config
+        let savedConfig = easyModeState.config
         easyModeState = EasyModeState()
+        easyModeState.config = savedConfig
+        easyModeState.showingConfig = false
         easyModeState.currentStep = .downloading
         easyModeState.statusText = "Starting automated pipeline..."
         
@@ -1702,64 +1708,133 @@ final class StudioStore: ObservableObject {
                 // Step 1: Download
                 easyModeState.currentStep = .downloading
                 easyModeState.statusText = "Downloading video from YouTube..."
-                easyModeState.progress = 0.1
+                easyModeState.progress = 0.08
                 
                 let metadata = try await VideoDownloader.fetchMetadata(url: url)
                 easyModeState.statusText = "Downloading: \(metadata.title)"
                 
                 let result = try await VideoDownloader.download(url: url, quality: .best) { [weak self] progress in
                     Task { @MainActor in
-                        self?.easyModeState.progress = 0.1 + (progress.percent / 100.0) * 0.3
+                        self?.easyModeState.progress = 0.08 + (progress.percent / 100.0) * 0.25
                         self?.easyModeState.statusText = String(format: "Downloading %.0f%% - %@", progress.percent, progress.speed)
                     }
                 }
                 
                 // Step 2: Create Project & Import
                 easyModeState.currentStep = .analyzing
-                easyModeState.progress = 0.4
+                easyModeState.progress = 0.33
                 easyModeState.statusText = "Creating project and importing video..."
                 
                 let project = makeProject(videoID: videoID, sourceInput: url, titlePrefix: metadata.title)
                 demoteCurrentProjects(excluding: project.id)
                 projects.insert(project, at: 0)
                 activeProjectID = project.id
+                
+                // Store affiliate info if provided
+                if let affiliate = config.affiliate, !affiliate.productName.isEmpty {
+                    // Could extend project metadata here
+                }
+                
                 persistWorkspace()
                 
                 await importPrimaryVideo(into: project.id, filePath: result.videoPath)
                 
-                // Step 3: Generate clips
+                // Step 3: Generate clips using config
                 easyModeState.currentStep = .clipping
-                easyModeState.progress = 0.5
-                easyModeState.statusText = "Analyzing content and generating clips..."
+                easyModeState.progress = 0.42
+                easyModeState.statusText = "Analyzing content for \(config.engagementStyle.rawValue) clips..."
                 
-                runAutoClipAndStitch(maxClips: 6)
+                runAutoClipAndStitch(maxClips: config.maxClips)
                 
-                // Step 4: Generate captions
+                // Step 4: Generate captions with configured style
                 easyModeState.currentStep = .captioning
-                easyModeState.progress = 0.6
-                easyModeState.statusText = "Generating captions..."
+                easyModeState.progress = 0.52
+                easyModeState.statusText = "Generating \(config.captionStyle.label) captions..."
                 
+                // Update caption style in editor settings
+                mutateActiveProject { proj in
+                    for i in proj.captions.indices {
+                        proj.captions[i].style = config.captionStyle
+                    }
+                }
                 regenerateCaptions()
                 
-                // Step 5: Stitch timeline
+                // Step 5: Generate AI Voice Over
+                easyModeState.currentStep = .voiceOver
+                easyModeState.progress = 0.62
+                
+                if config.voiceOver.enabled {
+                    easyModeState.statusText = "Generating AI voice over with \(config.voiceOver.tone.rawValue) tone..."
+                    
+                    let clipTitle = activeProject?.clips.first?.title
+                    let script = VoiceOverEngine.generateScript(
+                        config: config,
+                        clipTitle: clipTitle,
+                        transcriptSnippet: activeProject?.transcriptSegments.first?.text
+                    )
+                    
+                    let voiceOverDir = try prepareVoiceOverDirectory()
+                    let voiceOverPath = try await VoiceOverEngine.generateSystemTTS(
+                        script: script,
+                        config: config.voiceOver,
+                        outputDirectory: voiceOverDir
+                    )
+                    
+                    easyModeState.generatedVoiceOverPath = voiceOverPath.path
+                    
+                    // Add to timeline as audio clip
+                    mutateActiveProject { proj in
+                        let voClip = TimelineAudioClip(
+                            id: UUID(),
+                            label: "AI Voice Over",
+                            filePath: voiceOverPath.path,
+                            inPoint: 0,
+                            outPoint: 15, // Will be adjusted based on actual duration
+                            volume: 1.0,
+                            timelineStart: 0
+                        )
+                        proj.timelineAudioClips.append(voClip)
+                        
+                        // Also create voice over segment
+                        let voSegment = VoiceOverSegment(
+                            id: UUID(),
+                            start: 0,
+                            end: 15,
+                            note: script,
+                            audioFilePath: voiceOverPath.path
+                        )
+                        proj.voiceOvers.append(voSegment)
+                    }
+                    
+                    easyModeState.statusText = "Voice over generated!"
+                } else {
+                    easyModeState.statusText = "Skipping voice over (disabled)"
+                    try await Task.sleep(nanoseconds: 200_000_000)
+                }
+                
+                // Step 6: Stitch timeline
                 easyModeState.currentStep = .stitching
-                easyModeState.progress = 0.7
-                easyModeState.statusText = "Building timeline..."
+                easyModeState.progress = 0.72
+                easyModeState.statusText = "Building timeline for \(config.targetPlatform.rawValue)..."
                 
-                // Timeline is already built by runAutoClipAndStitch
-                try await Task.sleep(nanoseconds: 500_000_000) // Brief pause for UI
+                // Update export preset based on config
+                mutateActiveProject { proj in
+                    proj.editor.aspectRatio = config.targetPlatform == .youtubeShorts || config.targetPlatform == .tiktok || config.targetPlatform == .instagramReels ? .vertical : .landscape
+                }
                 
-                // Step 6: Export
+                try await Task.sleep(nanoseconds: 300_000_000)
+                
+                // Step 7: Export
                 easyModeState.currentStep = .exporting
-                easyModeState.progress = 0.8
-                easyModeState.statusText = "Rendering final video..."
+                easyModeState.progress = 0.82
+                easyModeState.statusText = "Rendering final video for \(config.targetPlatform.rawValue)..."
                 
                 await performExportCurrentProject()
                 
                 // Complete
                 easyModeState.currentStep = .complete
                 easyModeState.progress = 1.0
-                easyModeState.statusText = "✓ Your video is ready!"
+                easyModeState.statusText = "✓ Your \(config.purpose.rawValue.lowercased()) video is ready!"
                 
                 if let latestExport = activeProject?.exports.sorted(by: { $0.date > $1.date }).first {
                     easyModeState.outputPath = latestExport.outputPath
@@ -1775,8 +1850,19 @@ final class StudioStore: ObservableObject {
         }
     }
     
+    private func prepareVoiceOverDirectory() throws -> URL {
+        let directory = fileManager.homeDirectoryForCurrentUser
+            .appendingPathComponent("Movies", isDirectory: true)
+            .appendingPathComponent("CliperTubeVoiceOvers", isDirectory: true)
+        try fileManager.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
+    }
+    
     func resetEasyMode() {
+        let config = easyModeState.config // Preserve config
         easyModeState = EasyModeState()
+        easyModeState.config = config
+        easyModeState.showingConfig = true
         easyModeURL = ""
     }
     

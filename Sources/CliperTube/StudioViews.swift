@@ -40,7 +40,7 @@ struct StudioRootView: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
 
-            Text("v1.4.0")
+            Text("v1.5.0")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .padding(.bottom, 8)
@@ -435,237 +435,470 @@ struct DashboardView: View {
 struct EasyModeView: View {
     @EnvironmentObject private var store: StudioStore
     @State private var isAnimating = false
+    @State private var showAffiliateConfig = false
     
     var body: some View {
         ScrollView {
-            VStack(spacing: 32) {
+            VStack(spacing: 24) {
                 // Header
-                VStack(spacing: 8) {
-                    Image(systemName: "wand.and.stars")
-                        .font(.system(size: 48))
-                        .foregroundStyle(.blue)
-                        .opacity(store.easyModeState.currentStep != .idle && !store.easyModeState.currentStep.isTerminal ? (isAnimating ? 0.6 : 1.0) : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isAnimating)
-                    
-                    Text("Easy Mode")
-                        .font(.largeTitle.weight(.bold))
-                    
-                    Text("One-click video creation from YouTube")
-                        .font(.title3)
-                        .foregroundStyle(.secondary)
-                }
-                .padding(.top, 40)
+                easyModeHeader
                 
-                // URL Input
-                if store.easyModeState.currentStep == .idle || store.easyModeState.currentStep.isTerminal {
-                    VStack(spacing: 16) {
-                        HStack {
-                            Image(systemName: "link")
-                                .foregroundStyle(.secondary)
-                            TextField("Paste YouTube URL here...", text: $store.easyModeURL)
-                                .textFieldStyle(.plain)
-                                .font(.title3)
-                        }
-                        .padding(16)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 12))
-                        .frame(maxWidth: 600)
-                        
-                        Button {
-                            store.runEasyModePipeline(url: store.easyModeURL)
-                        } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "sparkles")
-                                Text("Create Video Automatically")
-                                    .font(.headline)
-                            }
-                            .padding(.horizontal, 32)
-                            .padding(.vertical, 16)
-                        }
-                        .buttonStyle(.borderedProminent)
-                        .controlSize(.large)
-                        .disabled(store.easyModeURL.isEmpty)
-                    }
+                // Main Content based on state
+                if store.easyModeState.showingConfig && store.easyModeState.currentStep == .idle {
+                    // Configuration Phase
+                    configurationSection
+                } else if store.easyModeState.currentStep != .idle && !store.easyModeState.currentStep.isTerminal {
+                    // Pipeline Running
+                    pipelineProgressSection
+                } else if store.easyModeState.currentStep == .complete {
+                    // Complete
+                    completionSection
+                } else if store.easyModeState.currentStep == .failed {
+                    // Failed with error
+                    errorSection
                 }
                 
-                // Pipeline Progress
-                if store.easyModeState.currentStep != .idle {
-                    VStack(spacing: 24) {
-                        // Progress Steps
-                        HStack(spacing: 0) {
-                            ForEach(Array(EasyModePipelineStep.allCases.dropFirst().dropLast(2).enumerated()), id: \.element) { index, step in
-                                VStack(spacing: 8) {
-                                    ZStack {
-                                        Circle()
-                                            .fill(stepColor(for: step))
-                                            .frame(width: 40, height: 40)
-                                        
-                                        if store.easyModeState.currentStep == step {
-                                            Circle()
-                                                .stroke(Color.accentColor, lineWidth: 3)
-                                                .frame(width: 48, height: 48)
-                                                .scaleEffect(isAnimating ? 1.1 : 1.0)
-                                                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isAnimating)
-                                        }
-                                        
-                                        Image(systemName: step.icon)
-                                            .font(.system(size: 16, weight: .medium))
-                                            .foregroundStyle(stepIconColor(for: step))
-                                    }
-                                    
-                                    Text(step.rawValue)
-                                        .font(.caption)
-                                        .foregroundStyle(isStepActive(step) ? .primary : .secondary)
-                                }
-                                .frame(maxWidth: .infinity)
-                                
-                                if index < EasyModePipelineStep.allCases.dropFirst().dropLast(2).count - 1 {
-                                    Rectangle()
-                                        .fill(stepConnectorColor(after: step))
-                                        .frame(height: 2)
-                                        .frame(maxWidth: 40)
-                                }
-                            }
-                        }
-                        .padding(.horizontal, 40)
-                        
-                        // Progress Bar
-                        VStack(spacing: 8) {
-                            ProgressView(value: store.easyModeState.progress)
-                                .progressViewStyle(.linear)
-                                .scaleEffect(y: 2)
-                            
-                            Text(store.easyModeState.statusText)
-                                .font(.subheadline)
-                                .foregroundStyle(.secondary)
-                        }
-                        .frame(maxWidth: 500)
-                    }
-                    .padding(.vertical, 24)
-                    .onAppear { isAnimating = true }
-                }
-                
-                // Error Display
-                if let error = store.easyModeState.error {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundStyle(.red)
-                        Text(error)
-                            .foregroundStyle(.red)
-                    }
-                    .padding()
-                    .background(Color.red.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                }
-                
-                // Complete State
-                if store.easyModeState.currentStep == .complete {
-                    VStack(spacing: 16) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .font(.system(size: 64))
-                            .foregroundStyle(.green)
-                        
-                        Text("Your video is ready!")
-                            .font(.title2.weight(.semibold))
-                        
-                        HStack(spacing: 12) {
-                            if let outputPath = store.easyModeState.outputPath {
-                                Button {
-                                    store.revealOutput(path: outputPath)
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "folder")
-                                        Text("Show in Finder")
-                                    }
-                                }
-                                .buttonStyle(.bordered)
-                                
-                                Button {
-                                    NSWorkspace.shared.open(URL(fileURLWithPath: outputPath))
-                                } label: {
-                                    HStack {
-                                        Image(systemName: "play.fill")
-                                        Text("Play Video")
-                                    }
-                                }
-                                .buttonStyle(.borderedProminent)
-                            }
-                            
-                            Button {
-                                store.resetEasyMode()
-                            } label: {
-                                HStack {
-                                    Image(systemName: "plus")
-                                    Text("Create Another")
-                                }
-                            }
-                            .buttonStyle(.bordered)
-                        }
-                    }
-                    .padding(.vertical, 24)
-                }
-                
-                // Recent Outputs Preview
-                if store.easyModeState.currentStep == .idle {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("Recent Creations")
-                            .font(.headline)
-                        
-                        if store.outputHistory.isEmpty {
-                            Text("No videos created yet. Paste a YouTube URL above to get started!")
-                                .foregroundStyle(.secondary)
-                                .padding()
-                        } else {
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: 200))], spacing: 16) {
-                                ForEach(store.outputHistory.prefix(6)) { item in
-                                    VStack(alignment: .leading, spacing: 8) {
-                                        RoundedRectangle(cornerRadius: 8)
-                                            .fill(Color.secondary.opacity(0.2))
-                                            .frame(height: 120)
-                                            .overlay {
-                                                Image(systemName: "film")
-                                                    .font(.largeTitle)
-                                                    .foregroundStyle(.secondary)
-                                            }
-                                        
-                                        Text(item.projectTitle)
-                                            .font(.caption.weight(.medium))
-                                            .lineLimit(1)
-                                        
-                                        Text(item.export.date, style: .relative)
-                                            .font(.caption2)
-                                            .foregroundStyle(.secondary)
-                                    }
-                                    .onTapGesture {
-                                        store.revealOutput(path: item.export.outputPath)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 40)
+                // Error Display (can show during config too)
+                if let error = store.easyModeState.error, store.easyModeState.currentStep != .failed {
+                    errorBanner(error)
                 }
                 
                 Spacer(minLength: 40)
-                
-                // Switch to Pro Mode hint
-                if store.easyModeState.currentStep == .idle {
-                    HStack {
-                        Text("Need more control?")
-                            .foregroundStyle(.secondary)
-                        Button("Switch to Pro Mode") {
-                            store.appMode = .pro
-                        }
-                        .buttonStyle(.link)
-                    }
-                    .font(.caption)
-                    .padding(.bottom, 20)
-                }
             }
             .frame(maxWidth: .infinity)
+            .padding(.horizontal, 20)
         }
     }
+    
+    // MARK: - Header
+    
+    private var easyModeHeader: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "wand.and.stars")
+                .font(.system(size: 48))
+                .foregroundStyle(.blue)
+                .opacity(store.easyModeState.currentStep != .idle && !store.easyModeState.currentStep.isTerminal ? (isAnimating ? 0.6 : 1.0) : 1.0)
+                .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isAnimating)
+            
+            Text("Easy Mode")
+                .font(.largeTitle.weight(.bold))
+            
+            Text(store.easyModeState.showingConfig ? "Configure your content" : "One-click video creation")
+                .font(.title3)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.top, 32)
+    }
+    
+    // MARK: - Configuration Section
+    
+    private var configurationSection: some View {
+        VStack(spacing: 24) {
+            // URL Input
+            VStack(alignment: .leading, spacing: 8) {
+                Label("YouTube URL", systemImage: "link")
+                    .font(.headline)
+                
+                HStack {
+                    Image(systemName: "play.rectangle.fill")
+                        .foregroundStyle(.red)
+                    TextField("Paste YouTube URL here...", text: $store.easyModeURL)
+                        .textFieldStyle(.plain)
+                        .font(.body)
+                }
+                .padding(12)
+                .background(Color.secondary.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 10))
+            }
+            .frame(maxWidth: 700)
+            
+            // Content Purpose
+            VStack(alignment: .leading, spacing: 12) {
+                Label("What's the goal?", systemImage: "target")
+                    .font(.headline)
+                
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 150))], spacing: 12) {
+                    ForEach(ContentPurpose.allCases) { purpose in
+                        PurposeCard(
+                            purpose: purpose,
+                            isSelected: store.easyModeState.config.purpose == purpose,
+                            onSelect: { store.easyModeState.config.purpose = purpose }
+                        )
+                    }
+                }
+            }
+            .frame(maxWidth: 700)
+            
+            // Engagement Style
+            VStack(alignment: .leading, spacing: 12) {
+                Label("Content Style", systemImage: "sparkles")
+                    .font(.headline)
+                
+                Text("Why will people watch this?")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 140))], spacing: 10) {
+                    ForEach(EngagementStyle.allCases) { style in
+                        StyleCard(
+                            style: style,
+                            isSelected: store.easyModeState.config.engagementStyle == style,
+                            onSelect: { store.easyModeState.config.engagementStyle = style }
+                        )
+                    }
+                }
+            }
+            .frame(maxWidth: 700)
+            
+            // Voice Over Configuration
+            VStack(alignment: .leading, spacing: 12) {
+                HStack {
+                    Label("AI Voice Over", systemImage: "waveform.and.mic")
+                        .font(.headline)
+                    
+                    Spacer()
+                    
+                    Toggle("", isOn: $store.easyModeState.config.voiceOver.enabled)
+                        .labelsHidden()
+                }
+                
+                if store.easyModeState.config.voiceOver.enabled {
+                    VoiceOverConfigView(config: $store.easyModeState.config.voiceOver)
+                }
+            }
+            .padding()
+            .background(Color.secondary.opacity(0.05))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .frame(maxWidth: 700)
+            
+            // Affiliate/Product (for selling/affiliate purposes)
+            if store.easyModeState.config.purpose == .selling || store.easyModeState.config.purpose == .affiliate {
+                VStack(alignment: .leading, spacing: 12) {
+                    HStack {
+                        Label("Product/Affiliate Info", systemImage: "cart.fill")
+                            .font(.headline)
+                        
+                        Spacer()
+                        
+                        Button(showAffiliateConfig ? "Hide" : "Configure") {
+                            showAffiliateConfig.toggle()
+                        }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                    }
+                    
+                    if showAffiliateConfig {
+                        AffiliateConfigView(affiliate: affiliateBinding)
+                    }
+                }
+                .padding()
+                .background(Color.orange.opacity(0.1))
+                .clipShape(RoundedRectangle(cornerRadius: 12))
+                .frame(maxWidth: 700)
+            }
+            
+            // Quick Settings
+            HStack(spacing: 20) {
+                // Platform
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Platform")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $store.easyModeState.config.targetPlatform) {
+                        ForEach(ExportPlatform.allCases) { platform in
+                            Text(platform.rawValue).tag(platform)
+                        }
+                    }
+                    .labelsHidden()
+                }
+                
+                // Caption Style
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Caption Style")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $store.easyModeState.config.captionStyle) {
+                        ForEach(CaptionStyle.allCases) { style in
+                            Text(style.label).tag(style)
+                        }
+                    }
+                    .labelsHidden()
+                }
+                
+                // Max Clips
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Max Clips")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Stepper("\(store.easyModeState.config.maxClips)", value: $store.easyModeState.config.maxClips, in: 1...12)
+                }
+            }
+            .frame(maxWidth: 700)
+            
+            // Start Button
+            Button {
+                store.runEasyModePipeline(url: store.easyModeURL)
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "sparkles")
+                    Text("Create \(store.easyModeState.config.purpose.rawValue) Video")
+                        .font(.headline)
+                }
+                .padding(.horizontal, 32)
+                .padding(.vertical, 14)
+            }
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
+            .disabled(store.easyModeURL.isEmpty)
+            .padding(.top, 8)
+            
+            // Pro Mode hint
+            HStack {
+                Text("Need more control?")
+                    .foregroundStyle(.secondary)
+                Button("Switch to Pro Mode") {
+                    store.appMode = .pro
+                }
+                .buttonStyle(.link)
+            }
+            .font(.caption)
+        }
+    }
+    
+    private var affiliateBinding: Binding<AffiliateInfo> {
+        Binding(
+            get: { store.easyModeState.config.affiliate ?? .empty },
+            set: { store.easyModeState.config.affiliate = $0 }
+        )
+    }
+    
+    // MARK: - Pipeline Progress
+    
+    private var pipelineProgressSection: some View {
+        VStack(spacing: 24) {
+            // Current config summary
+            HStack(spacing: 16) {
+                Label(store.easyModeState.config.purpose.rawValue, systemImage: store.easyModeState.config.purpose.icon)
+                Label(store.easyModeState.config.engagementStyle.rawValue, systemImage: store.easyModeState.config.engagementStyle.icon)
+                if store.easyModeState.config.voiceOver.enabled {
+                    Label("Voice Over", systemImage: "waveform.and.mic")
+                }
+            }
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            
+            // Progress Steps
+            HStack(spacing: 0) {
+                ForEach(Array(EasyModePipelineStep.progressSteps.enumerated()), id: \.element) { index, step in
+                    VStack(spacing: 8) {
+                        ZStack {
+                            Circle()
+                                .fill(stepColor(for: step))
+                                .frame(width: 36, height: 36)
+                            
+                            if store.easyModeState.currentStep == step {
+                                Circle()
+                                    .stroke(Color.accentColor, lineWidth: 2)
+                                    .frame(width: 44, height: 44)
+                                    .scaleEffect(isAnimating ? 1.1 : 1.0)
+                                    .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true), value: isAnimating)
+                            }
+                            
+                            Image(systemName: step.icon)
+                                .font(.system(size: 14, weight: .medium))
+                                .foregroundStyle(stepIconColor(for: step))
+                        }
+                        
+                        Text(step.rawValue)
+                            .font(.caption2)
+                            .foregroundStyle(isStepActive(step) ? .primary : .secondary)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                    }
+                    .frame(maxWidth: .infinity)
+                    
+                    if index < EasyModePipelineStep.progressSteps.count - 1 {
+                        Rectangle()
+                            .fill(stepConnectorColor(after: step))
+                            .frame(height: 2)
+                            .frame(maxWidth: 30)
+                    }
+                }
+            }
+            .padding(.horizontal, 20)
+            
+            // Progress Bar
+            VStack(spacing: 8) {
+                ProgressView(value: store.easyModeState.progress)
+                    .progressViewStyle(.linear)
+                    .scaleEffect(y: 2)
+                
+                Text(store.easyModeState.statusText)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: 500)
+        }
+        .padding(.vertical, 24)
+        .onAppear { isAnimating = true }
+    }
+    
+    // MARK: - Completion
+    
+    private var completionSection: some View {
+        VStack(spacing: 20) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.green)
+            
+            Text("Your \(store.easyModeState.config.purpose.rawValue.lowercased()) video is ready!")
+                .font(.title2.weight(.semibold))
+            
+            if store.easyModeState.config.voiceOver.enabled, store.easyModeState.generatedVoiceOverPath != nil {
+                Label("AI Voice Over included", systemImage: "waveform.and.mic")
+                    .font(.caption)
+                    .foregroundStyle(.green)
+            }
+            
+            HStack(spacing: 12) {
+                if let outputPath = store.easyModeState.outputPath {
+                    Button {
+                        store.revealOutput(path: outputPath)
+                    } label: {
+                        HStack {
+                            Image(systemName: "folder")
+                            Text("Show in Finder")
+                        }
+                    }
+                    .buttonStyle(.bordered)
+                    
+                    Button {
+                        NSWorkspace.shared.open(URL(fileURLWithPath: outputPath))
+                    } label: {
+                        HStack {
+                            Image(systemName: "play.fill")
+                            Text("Play Video")
+                        }
+                    }
+                    .buttonStyle(.borderedProminent)
+                }
+                
+                Button {
+                    store.resetEasyMode()
+                } label: {
+                    HStack {
+                        Image(systemName: "plus")
+                        Text("Create Another")
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+            
+            // Recent Outputs
+            recentOutputsSection
+        }
+        .padding(.vertical, 24)
+    }
+    
+    // MARK: - Error Section
+    
+    private var errorSection: some View {
+        VStack(spacing: 16) {
+            Image(systemName: "xmark.circle.fill")
+                .font(.system(size: 64))
+                .foregroundStyle(.red)
+            
+            Text("Something went wrong")
+                .font(.title2.weight(.semibold))
+            
+            if let error = store.easyModeState.error {
+                Text(error)
+                    .font(.body)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+            
+            HStack(spacing: 12) {
+                Button {
+                    store.runEasyModePipeline(url: store.easyModeURL)
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.clockwise")
+                        Text("Try Again")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                
+                Button {
+                    store.resetEasyMode()
+                } label: {
+                    HStack {
+                        Image(systemName: "arrow.left")
+                        Text("Start Over")
+                    }
+                }
+                .buttonStyle(.bordered)
+            }
+        }
+        .padding(.vertical, 24)
+    }
+    
+    private func errorBanner(_ error: String) -> some View {
+        HStack {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+            Text(error)
+                .foregroundStyle(.orange)
+        }
+        .padding()
+        .background(Color.orange.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+    
+    // MARK: - Recent Outputs
+    
+    private var recentOutputsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text("Recent Creations")
+                .font(.headline)
+            
+            if store.outputHistory.isEmpty {
+                Text("No videos created yet.")
+                    .foregroundStyle(.secondary)
+            } else {
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 180))], spacing: 12) {
+                    ForEach(store.outputHistory.prefix(4)) { item in
+                        VStack(alignment: .leading, spacing: 6) {
+                            RoundedRectangle(cornerRadius: 8)
+                                .fill(Color.secondary.opacity(0.2))
+                                .frame(height: 100)
+                                .overlay {
+                                    Image(systemName: "film")
+                                        .font(.title)
+                                        .foregroundStyle(.secondary)
+                                }
+                            
+                            Text(item.projectTitle)
+                                .font(.caption.weight(.medium))
+                                .lineLimit(1)
+                            
+                            Text(item.export.date, style: .relative)
+                                .font(.caption2)
+                                .foregroundStyle(.secondary)
+                        }
+                        .onTapGesture {
+                            store.revealOutput(path: item.export.outputPath)
+                        }
+                    }
+                }
+            }
+        }
+        .frame(maxWidth: 600, alignment: .leading)
+        .padding(.top, 24)
+    }
+    
+    // MARK: - Helpers
     
     private func stepColor(for step: EasyModePipelineStep) -> Color {
         if isStepComplete(step) { return .green }
@@ -683,13 +916,196 @@ struct EasyModeView: View {
     }
     
     private func isStepComplete(_ step: EasyModePipelineStep) -> Bool {
-        guard let currentIndex = EasyModePipelineStep.allCases.firstIndex(of: store.easyModeState.currentStep),
-              let stepIndex = EasyModePipelineStep.allCases.firstIndex(of: step) else { return false }
+        guard let currentIndex = EasyModePipelineStep.progressSteps.firstIndex(of: store.easyModeState.currentStep),
+              let stepIndex = EasyModePipelineStep.progressSteps.firstIndex(of: step) else { return false }
         return stepIndex < currentIndex
     }
     
     private func isStepActive(_ step: EasyModePipelineStep) -> Bool {
         isStepComplete(step) || store.easyModeState.currentStep == step
+    }
+}
+
+// MARK: - Purpose Card
+
+struct PurposeCard: View {
+    let purpose: ContentPurpose
+    let isSelected: Bool
+    let onSelect: () -> Void
+    
+    var body: some View {
+        Button(action: onSelect) {
+            VStack(spacing: 8) {
+                Image(systemName: purpose.icon)
+                    .font(.title2)
+                    .foregroundStyle(isSelected ? .white : .primary)
+                
+                Text(purpose.rawValue)
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(isSelected ? .white : .primary)
+                    .multilineTextAlignment(.center)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 16)
+            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.1))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Style Card
+
+struct StyleCard: View {
+    let style: EngagementStyle
+    let isSelected: Bool
+    let onSelect: () -> Void
+    
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Image(systemName: style.icon)
+                    .font(.body)
+                
+                Text(style.rawValue)
+                    .font(.caption)
+                    .lineLimit(1)
+            }
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 10)
+            .padding(.horizontal, 8)
+            .background(isSelected ? Color.accentColor : Color.secondary.opacity(0.1))
+            .foregroundStyle(isSelected ? .white : .primary)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+// MARK: - Voice Over Config View
+
+struct VoiceOverConfigView: View {
+    @Binding var config: VoiceOverConfig
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            // Tone Selection
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Voice Tone")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                LazyVGrid(columns: [GridItem(.adaptive(minimum: 100))], spacing: 8) {
+                    ForEach(VoiceOverTone.allCases) { tone in
+                        Button {
+                            config.tone = tone
+                        } label: {
+                            HStack(spacing: 4) {
+                                Image(systemName: tone.icon)
+                                    .font(.caption)
+                                Text(tone.rawValue)
+                                    .font(.caption)
+                            }
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 8)
+                            .background(config.tone == tone ? Color.blue : Color.secondary.opacity(0.15))
+                            .foregroundStyle(config.tone == tone ? .white : .primary)
+                            .clipShape(RoundedRectangle(cornerRadius: 6))
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
+            }
+            
+            Divider()
+            
+            // Options
+            HStack(spacing: 20) {
+                Toggle("Include Hook", isOn: $config.includeHook)
+                    .toggleStyle(.checkbox)
+                
+                Toggle("Include CTA", isOn: $config.includeCTA)
+                    .toggleStyle(.checkbox)
+            }
+            .font(.caption)
+            
+            // Custom Script
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Custom Script (optional)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                TextField("Leave empty for auto-generated script...", text: customScriptBinding)
+                    .textFieldStyle(.roundedBorder)
+                    .font(.caption)
+            }
+        }
+        .padding(.top, 8)
+    }
+    
+    private var customScriptBinding: Binding<String> {
+        Binding(
+            get: { config.customScript ?? "" },
+            set: { config.customScript = $0.isEmpty ? nil : $0 }
+        )
+    }
+}
+
+// MARK: - Affiliate Config View
+
+struct AffiliateConfigView: View {
+    @Binding var affiliate: AffiliateInfo
+    
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Platform")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Picker("", selection: $affiliate.platform) {
+                        ForEach(AffiliatePlatform.allCases) { platform in
+                            Text(platform.rawValue).tag(platform)
+                        }
+                    }
+                    .labelsHidden()
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Product Name")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Product name...", text: $affiliate.productName)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            
+            HStack(spacing: 16) {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Affiliate Tag")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("Your affiliate tag...", text: $affiliate.affiliateTag)
+                        .textFieldStyle(.roundedBorder)
+                }
+                
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Price")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    TextField("$XX.XX", text: $affiliate.price)
+                        .textFieldStyle(.roundedBorder)
+                }
+            }
+            
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Call to Action")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                TextField("Link in bio!", text: $affiliate.callToAction)
+                    .textFieldStyle(.roundedBorder)
+            }
+        }
     }
 }
 
@@ -2526,15 +2942,41 @@ struct VoiceOverView: View {
     @EnvironmentObject private var store: StudioStore
     @State private var importerPresented = false
     @State private var selectedVoiceOverID: UUID?
+    @State private var showAIGenerator = false
+    @State private var aiConfig = VoiceOverConfig.default
+    @State private var aiScript = ""
+    @State private var isGenerating = false
+    @State private var generationError: String?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            Text("Voice Over Timeline")
-                .font(.title2.weight(.bold))
-
-            Text("Assign narration notes and attach audio files per stitched clip.")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            // Header
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("Voice Over Timeline")
+                        .font(.title2.weight(.bold))
+                    Text("Assign narration notes, attach audio, or generate AI voice overs.")
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
+                
+                Spacer()
+                
+                Button {
+                    showAIGenerator.toggle()
+                } label: {
+                    HStack {
+                        Image(systemName: "waveform.and.mic")
+                        Text("AI Voice Over")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+            }
+            
+            // AI Generator Panel
+            if showAIGenerator {
+                aiGeneratorPanel
+            }
 
             if let project = store.activeProject {
                 List(project.voiceOvers) { segment in
@@ -2545,9 +2987,20 @@ struct VoiceOverView: View {
                                 .foregroundStyle(.secondary)
                             Spacer()
                             if let audioPath = segment.audioFilePath {
-                                Text(URL(fileURLWithPath: audioPath).lastPathComponent)
-                                    .font(.caption)
-                                    .foregroundStyle(.green)
+                                HStack(spacing: 4) {
+                                    Image(systemName: "checkmark.circle.fill")
+                                        .foregroundStyle(.green)
+                                    Text(URL(fileURLWithPath: audioPath).lastPathComponent)
+                                        .font(.caption)
+                                        .foregroundStyle(.green)
+                                    
+                                    Button {
+                                        NSWorkspace.shared.open(URL(fileURLWithPath: audioPath))
+                                    } label: {
+                                        Image(systemName: "play.circle")
+                                    }
+                                    .buttonStyle(.plain)
+                                }
                             } else {
                                 Text("No audio attached")
                                     .font(.caption)
@@ -2556,7 +3009,7 @@ struct VoiceOverView: View {
                         }
 
                         TextField(
-                            "Narration note",
+                            "Narration note / script",
                             text: Binding(
                                 get: { segment.note },
                                 set: { store.updateVoiceOverNote(segment.id, note: $0) }
@@ -2564,18 +3017,41 @@ struct VoiceOverView: View {
                         )
                         .textFieldStyle(.roundedBorder)
 
-                        Button("Attach Audio File") {
-                            selectedVoiceOverID = segment.id
-                            importerPresented = true
+                        HStack(spacing: 8) {
+                            Button {
+                                selectedVoiceOverID = segment.id
+                                importerPresented = true
+                            } label: {
+                                HStack {
+                                    Image(systemName: "doc.badge.plus")
+                                    Text("Attach Audio")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            
+                            Button {
+                                generateVoiceOverForSegment(segment)
+                            } label: {
+                                HStack {
+                                    Image(systemName: "waveform.and.mic")
+                                    Text("Generate AI")
+                                }
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(segment.note.isEmpty || isGenerating)
                         }
-                        .buttonStyle(.bordered)
                     }
                     .padding(.vertical, 4)
                 }
             } else {
-                Text("Create or open a project first to build voice-over lanes.")
-                    .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                VStack(spacing: 16) {
+                    Image(systemName: "waveform")
+                        .font(.largeTitle)
+                        .foregroundStyle(.secondary)
+                    Text("Create or open a project first to build voice-over lanes.")
+                        .foregroundStyle(.secondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
             }
         }
         .padding(22)
@@ -2593,6 +3069,191 @@ struct VoiceOverView: View {
             store.attachVoiceOverAudio(selectedID, filePath: url.path)
             if accessed { url.stopAccessingSecurityScopedResource() }
         }
+        .alert("Generation Error", isPresented: .constant(generationError != nil)) {
+            Button("OK") { generationError = nil }
+        } message: {
+            Text(generationError ?? "")
+        }
+    }
+    
+    // MARK: - AI Generator Panel
+    
+    private var aiGeneratorPanel: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack {
+                Text("AI Voice Generator")
+                    .font(.headline)
+                Spacer()
+                Button {
+                    showAIGenerator = false
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+            }
+            
+            // Voice Tone
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Voice Tone")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
+                        ForEach(VoiceOverTone.allCases) { tone in
+                            Button {
+                                aiConfig.tone = tone
+                            } label: {
+                                HStack(spacing: 4) {
+                                    Image(systemName: tone.icon)
+                                        .font(.caption)
+                                    Text(tone.rawValue)
+                                        .font(.caption)
+                                }
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 6)
+                                .background(aiConfig.tone == tone ? Color.accentColor : Color.secondary.opacity(0.15))
+                                .foregroundStyle(aiConfig.tone == tone ? .white : .primary)
+                                .clipShape(Capsule())
+                            }
+                            .buttonStyle(.plain)
+                        }
+                    }
+                }
+            }
+            
+            // Script Input
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Script")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                
+                TextEditor(text: $aiScript)
+                    .font(.body)
+                    .frame(height: 80)
+                    .padding(4)
+                    .background(Color.secondary.opacity(0.1))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+            }
+            
+            // Generate Button
+            HStack {
+                Button {
+                    generateGlobalVoiceOver()
+                } label: {
+                    HStack {
+                        if isGenerating {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                        } else {
+                            Image(systemName: "waveform.and.mic")
+                        }
+                        Text(isGenerating ? "Generating..." : "Generate Voice Over")
+                    }
+                }
+                .buttonStyle(.borderedProminent)
+                .disabled(aiScript.isEmpty || isGenerating)
+                
+                if isGenerating {
+                    Text("This may take a few seconds...")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding()
+        .background(Color.accentColor.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+    }
+    
+    // MARK: - Voice Over Generation
+    
+    private func generateGlobalVoiceOver() {
+        guard !aiScript.isEmpty else { return }
+        isGenerating = true
+        generationError = nil
+        
+        Task {
+            do {
+                let outputDir = try prepareVoiceOverDirectory()
+                let outputPath = try await VoiceOverEngine.generateSystemTTS(
+                    script: aiScript,
+                    config: aiConfig,
+                    outputDirectory: outputDir
+                )
+                
+                await MainActor.run {
+                    // Add to project as new voice over segment
+                    store.mutateActiveProjectPublic { project in
+                        let segment = VoiceOverSegment(
+                            id: UUID(),
+                            start: 0,
+                            end: 15,
+                            note: aiScript,
+                            audioFilePath: outputPath.path
+                        )
+                        project.voiceOvers.append(segment)
+                        
+                        // Also add as timeline audio
+                        let audioClip = TimelineAudioClip(
+                            id: UUID(),
+                            label: "AI Voice Over",
+                            filePath: outputPath.path,
+                            inPoint: 0,
+                            outPoint: 15,
+                            volume: 1.0,
+                            timelineStart: 0
+                        )
+                        project.timelineAudioClips.append(audioClip)
+                    }
+                    
+                    isGenerating = false
+                    aiScript = ""
+                    showAIGenerator = false
+                }
+            } catch {
+                await MainActor.run {
+                    generationError = error.localizedDescription
+                    isGenerating = false
+                }
+            }
+        }
+    }
+    
+    private func generateVoiceOverForSegment(_ segment: VoiceOverSegment) {
+        guard !segment.note.isEmpty else { return }
+        isGenerating = true
+        generationError = nil
+        
+        Task {
+            do {
+                let outputDir = try prepareVoiceOverDirectory()
+                let outputPath = try await VoiceOverEngine.generateSystemTTS(
+                    script: segment.note,
+                    config: aiConfig,
+                    outputDirectory: outputDir
+                )
+                
+                await MainActor.run {
+                    store.attachVoiceOverAudio(segment.id, filePath: outputPath.path)
+                    isGenerating = false
+                }
+            } catch {
+                await MainActor.run {
+                    generationError = error.localizedDescription
+                    isGenerating = false
+                }
+            }
+        }
+    }
+    
+    private func prepareVoiceOverDirectory() throws -> URL {
+        let directory = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent("Movies", isDirectory: true)
+            .appendingPathComponent("CliperTubeVoiceOvers", isDirectory: true)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        return directory
     }
 
     private func timeString(_ value: TimeInterval) -> String {

@@ -1,4 +1,6 @@
 import Foundation
+import AVFoundation
+import AppKit
 
 enum YouTubeParser {
     static func extractID(from input: String) -> String? {
@@ -213,6 +215,221 @@ enum VoiceOverPlanner {
                 note: "Narrate payoff for \(clip.title)",
                 audioFilePath: nil
             )
+        }
+    }
+}
+
+// MARK: - AI Voice Over Engine
+
+/// Generates voice over audio using macOS TTS or external APIs
+enum VoiceOverEngine {
+    
+    /// Available system voices for voice over
+    static func availableVoices() -> [(id: String, name: String, language: String)] {
+        AVSpeechSynthesisVoice.speechVoices()
+            .filter { $0.language.starts(with: "en") } // English voices
+            .map { ($0.identifier, $0.name, $0.language) }
+    }
+    
+    /// Get the best default English voice
+    static func defaultVoiceID() -> String {
+        // Prefer premium voices
+        let premiumVoices = ["com.apple.voice.premium.en-US.Zoe",
+                             "com.apple.voice.premium.en-US.Evan",
+                             "com.apple.voice.enhanced.en-US.Evan",
+                             "com.apple.voice.enhanced.en-US.Samantha"]
+        
+        for voiceID in premiumVoices {
+            if AVSpeechSynthesisVoice(identifier: voiceID) != nil {
+                return voiceID
+            }
+        }
+        
+        // Fallback to first available English voice
+        return AVSpeechSynthesisVoice.speechVoices()
+            .first(where: { $0.language.starts(with: "en-US") })?
+            .identifier ?? "com.apple.voice.compact.en-US.Samantha"
+    }
+    
+    /// Generate voice over audio file using system TTS
+    /// - Parameters:
+    ///   - script: The text to speak
+    ///   - config: Voice over configuration
+    ///   - outputDirectory: Where to save the audio file
+    /// - Returns: Path to generated audio file
+    static func generateSystemTTS(
+        script: String,
+        config: VoiceOverConfig,
+        outputDirectory: URL
+    ) async throws -> URL {
+        
+        let voiceID = config.voiceID ?? defaultVoiceID()
+        
+        // Create output file path
+        let timestamp = ISO8601DateFormatter().string(from: Date())
+            .replacingOccurrences(of: ":", with: "-")
+        let outputPath = outputDirectory
+            .appendingPathComponent("voiceover-\(timestamp).m4a")
+        
+        // Use NSSpeechSynthesizer for file output (AVSpeechSynthesizer doesn't support direct file output)
+        return try await withCheckedThrowingContinuation { continuation in
+            let synthesizer = NSSpeechSynthesizer()
+            
+            // Find and set the voice
+            if let voice = NSSpeechSynthesizer.availableVoices.first(where: { $0.rawValue.contains(voiceID) }) {
+                synthesizer.setVoice(voice)
+            } else if let defaultVoice = NSSpeechSynthesizer.availableVoices.first(where: { $0.rawValue.contains("en-US") }) {
+                synthesizer.setVoice(defaultVoice)
+            }
+            
+            // Set rate based on tone
+            synthesizer.rate = config.tone.speechRate * 200 // NSSpeechSynthesizer rate is words per minute
+            
+            // Create AIFF file first (NSSpeechSynthesizer native format)
+            let tempAIFF = outputDirectory.appendingPathComponent("temp-voiceover.aiff")
+            
+            // Use a dispatch queue since NSSpeechSynthesizer needs to run on main
+            DispatchQueue.main.async {
+                let success = synthesizer.startSpeaking(script, to: tempAIFF)
+                
+                if !success {
+                    continuation.resume(throwing: VoiceOverError.synthesisStartFailed)
+                    return
+                }
+                
+                // Poll for completion (NSSpeechSynthesizer doesn't have async API)
+                DispatchQueue.global(qos: .userInitiated).async {
+                    // Wait for speech to complete (max 60 seconds)
+                    var waited = 0
+                    while synthesizer.isSpeaking && waited < 600 {
+                        Thread.sleep(forTimeInterval: 0.1)
+                        waited += 1
+                    }
+                    
+                    // Check if AIFF was created
+                    guard FileManager.default.fileExists(atPath: tempAIFF.path) else {
+                        continuation.resume(throwing: VoiceOverError.fileNotCreated)
+                        return
+                    }
+                    
+                    // Convert AIFF to M4A using AVFoundation
+                    do {
+                        try convertToM4A(from: tempAIFF, to: outputPath)
+                        try? FileManager.default.removeItem(at: tempAIFF)
+                        continuation.resume(returning: outputPath)
+                    } catch {
+                        // Fallback: just rename AIFF to output path
+                        do {
+                            try FileManager.default.moveItem(at: tempAIFF, to: outputPath)
+                            continuation.resume(returning: outputPath)
+                        } catch {
+                            continuation.resume(throwing: error)
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    /// Convert audio file to M4A format
+    private static func convertToM4A(from source: URL, to destination: URL) throws {
+        let asset = AVAsset(url: source)
+        
+        guard let exportSession = AVAssetExportSession(asset: asset, presetName: AVAssetExportPresetAppleM4A) else {
+            throw VoiceOverError.exportSessionFailed
+        }
+        
+        exportSession.outputFileType = .m4a
+        exportSession.outputURL = destination
+        
+        let semaphore = DispatchSemaphore(value: 0)
+        var exportError: Error?
+        
+        exportSession.exportAsynchronously {
+            if exportSession.status == .failed {
+                exportError = exportSession.error ?? VoiceOverError.exportFailed
+            }
+            semaphore.signal()
+        }
+        
+        semaphore.wait()
+        
+        if let error = exportError {
+            throw error
+        }
+    }
+    
+    /// Generate a script based on content purpose and style
+    static func generateScript(
+        config: EasyModeConfig,
+        clipTitle: String?,
+        transcriptSnippet: String?
+    ) -> String {
+        var parts: [String] = []
+        
+        // Hook line based on engagement style
+        if config.voiceOver.includeHook {
+            parts.append(config.engagementStyle.hookPhrases.randomElement() ?? "Check this out")
+        }
+        
+        // Content reference
+        if let title = clipTitle, !title.isEmpty {
+            // Clean up the title for speech
+            let cleanTitle = title
+                .replacingOccurrences(of: "Clip:", with: "")
+                .trimmingCharacters(in: .whitespaces)
+            if !cleanTitle.isEmpty {
+                parts.append(cleanTitle)
+            }
+        }
+        
+        // Call to action based on purpose
+        if config.voiceOver.includeCTA {
+            switch config.purpose {
+            case .selling:
+                if let aff = config.affiliate, !aff.productName.isEmpty {
+                    parts.append("Get \(aff.productName) now! \(aff.callToAction)")
+                } else {
+                    parts.append("Link in description!")
+                }
+            case .channelGrowth:
+                parts.append("Subscribe for more content like this!")
+            case .engagement:
+                parts.append("Follow for more!")
+            case .affiliate:
+                if let aff = config.affiliate {
+                    parts.append(aff.callToAction)
+                } else {
+                    parts.append("Check the link in bio!")
+                }
+            case .brandAwareness:
+                parts.append("Stay tuned for more!")
+            }
+        }
+        
+        // Allow custom script override
+        if let custom = config.voiceOver.customScript, !custom.isEmpty {
+            return custom
+        }
+        
+        return parts.joined(separator: "... ")
+    }
+}
+
+enum VoiceOverError: LocalizedError {
+    case synthesisStartFailed
+    case fileNotCreated
+    case exportSessionFailed
+    case exportFailed
+    case unsupportedProvider
+    
+    var errorDescription: String? {
+        switch self {
+        case .synthesisStartFailed: return "Failed to start speech synthesis"
+        case .fileNotCreated: return "Voice over file was not created"
+        case .exportSessionFailed: return "Failed to create audio export session"
+        case .exportFailed: return "Failed to export audio"
+        case .unsupportedProvider: return "Voice provider not supported"
         }
     }
 }
